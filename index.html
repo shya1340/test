@@ -149,6 +149,10 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 
 <h2 class="sec" style="margin-top:22px">리그 참가</h2>
 <div id="leagueTeamsBox" class="result-line">계정 연결을 확인하는 중...</div>
+
+<div style="display:flex; justify-content:flex-end; margin-top:26px">
+<button class="btn ghost" id="logoutBtn" style="font-size:12px; padding:8px 16px">로그아웃</button>
+</div>
 </div>
 
 <div class="view" id="view-schedule">
@@ -193,19 +197,19 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <h3 style="margin:0 0 4px">뽑기권으로 선수 영입</h3>
 <div class="sub2">입단 시 지급된 뽑기권 1장당 1회, 화폐 대신 사용해요</div>
 <button class="btn" style="margin-top:10px; background:#fff; color:#0a5c3a" id="ticketGachaBtn">1회 뽑기 (뽑기권 1장)</button>
-<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff" id="ticketGacha10Btn">10회 뽑기 (뽑기권 10장)</button>
+<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff; background:transparent" id="ticketGacha10Btn">10회 뽑기 (뽑기권 10장)</button>
 </div>
 <div class="card-mini" style="background:linear-gradient(135deg,var(--navy),#1c5cc4)">
 <h3 style="margin:0 0 4px">선수 카드 뽑기</h3>
 <div class="sub2">300냥 · 일반58%·레어27%·에이스12%·레전드3%</div>
 <button class="btn" style="margin-top:10px; background:#fff; color:var(--navy)" id="shopGachaBtn">1회 뽑기 (300)</button>
-<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff" id="shopGacha10Btn">10회 뽑기 (2700)</button>
+<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff; background:transparent" id="shopGacha10Btn">10회 뽑기 (2700)</button>
 </div>
 <div class="card-mini" style="background:linear-gradient(135deg,#8a6d1f,#3a2e0d)">
 <h3 style="margin:0 0 4px">스킬블록 뽑기</h3>
 <div class="sub2">100냥 · 일반55%·레어32%·레전드13%</div>
 <button class="btn" style="margin-top:10px; background:#fff; color:#8a6d1f" id="shopBlockBtn">1회 뽑기 (100)</button>
-<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff" id="shopBlock10Btn">10회 뽑기 (900)</button>
+<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff; background:transparent" id="shopBlock10Btn">10회 뽑기 (900)</button>
 </div>
 <div class="note">화폐는 정규시즌/포스트시즌 경기 결과(승리 시 더 많이)로 자동으로 쌓여요. 뽑기로 얻은 선수는 라인업 탭 대기 명단에 추가돼서 바로 기용할 수 있어요. 팀을 처음 고르면 그 팀 선수(코스트 6 이하) 타자 1명·투수 1명과 뽑기권 30장을 기본으로 받아요.</div>
 </div>
@@ -395,6 +399,12 @@ function showTeamPickIfNeeded(){
   }
   return false;
 }
+document.getElementById('logoutBtn').addEventListener('click', ()=>{
+  localStorage.removeItem('sn_nickname');
+  const input = document.getElementById('nicknameInput'); if(input) input.value='';
+  hideTeamPickPage();
+  document.getElementById('nicknameGate').classList.add('active');
+});
 document.getElementById('nicknameStartBtn').addEventListener('click', ()=>{
   const v = document.getElementById('nicknameInput').value.trim();
   if(!v){ alert('닉네임을 입력해주세요.'); return; }
