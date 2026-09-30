@@ -85,7 +85,13 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .minicard .info .cst{color:var(--gold); font-weight:800; font-size:9.5px; margin-top:1px;}
 .minicard.empty .av{background:#e4e8ef; color:#b7c0d1;}
 .chev{color:var(--sub); font-size:16px; flex-shrink:0; align-self:center;}
-.flipcard{width:260px; margin:0 auto; border-radius:16px; overflow:hidden; box-shadow:0 12px 30px rgba(0,0,0,.3); user-select:none;}
+.flipcard{width:260px; margin:0 auto; border-radius:16px; overflow:hidden; box-shadow:0 12px 30px rgba(0,0,0,.3); user-select:none; box-sizing:border-box;}
+.flipcard.rarity-일반{border:3px solid #8b93a3;}
+.flipcard.rarity-레어{border:3px solid #2b7de9; box-shadow:0 12px 30px rgba(43,125,233,.35);}
+.flipcard.rarity-에이스{border:3px solid #8b3fd4; box-shadow:0 12px 34px rgba(139,63,212,.45);}
+.flipcard.rarity-레전드{border:4px double #d4a94b; box-shadow:0 0 26px rgba(212,169,75,.6), 0 12px 30px rgba(0,0,0,.35);}
+.flipcard .corner{position:absolute; font-size:13px; color:#d4a94b; text-shadow:0 0 4px rgba(212,169,75,.8);}
+.flipcard .mascot-bg{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:150px; opacity:.16; filter:blur(.5px);}
 .flipcard .fav{width:100%; aspect-ratio:3/4; display:flex; align-items:center; justify-content:center; font-size:64px; font-weight:800; color:#fff; position:relative;}
 .flipcard .fnum{position:absolute; top:8px; right:10px; background:rgba(0,0,0,.35); color:#fff; font-size:13px; font-weight:800; padding:3px 9px; border-radius:10px;}
 .flipcard .fbanner{position:absolute; top:8px; left:10px; font-size:10px; font-weight:800; padding:3px 8px; border-radius:8px; color:#fff;}
@@ -234,27 +240,34 @@ const ROSTER = {"삼성": {"lineup": [{"name": "디아즈", "team": "삼성", "t
 const TC = {"삼성": "#074CA1", "KT": "#000000", "LG": "#C30452", "KIA": "#EA0029", "두산": "#131230", "NC": "#315288", "SSG": "#CE0E2D", "롯데": "#041E42", "한화": "#FF6600", "키움": "#570514"};
 const TEAMS = ["삼성", "KT", "LG", "KIA", "두산", "NC", "SSG", "롯데", "한화", "키움"];
 
-let team = localStorage.getItem('sn_team') || '삼성';
-let lineup = JSON.parse(localStorage.getItem('sn_lineup_'+team) || 'null');
+let team = localStorage.getItem('sn_team_'+ns()) || '삼성';
+let lineup = JSON.parse(localStorage.getItem('sn_lineup_'+ns()+'_'+team) || 'null');
 
-// ===== 계정 동기화 (personal db) =====
+// ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
 let DB = null, UID = null, DB_READY = false, pushTimer = null, pushInFlight = false, pushQueued = false;
 const PERSONAL_TEAM_KEYS = ['sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_'];
+function ns(){ return getNickname() || 'guest'; }
 function collectSyncPayload(){
+  const nick = ns();
   const teamsData = {};
   TEAMS.forEach(t=>{
     const td = {};
-    PERSONAL_TEAM_KEYS.forEach(pref=>{ const v = localStorage.getItem(pref+t); if(v!==null) td[pref]=v; });
+    PERSONAL_TEAM_KEYS.forEach(pref=>{ const v = localStorage.getItem(pref+nick+'_'+t); if(v!==null) td[pref]=v; });
     if(Object.keys(td).length) teamsData[t]=td;
   });
-  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned')||'[]', onboarded: localStorage.getItem('sn_onboarded')||'[]', nickname: localStorage.getItem('sn_nickname')||'', updatedAt: new Date().toISOString() };
+  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', updatedAt: new Date().toISOString() };
 }
 async function pushNow(){
   if(!DB_READY || !UID) return;
   if(pushInFlight){ pushQueued=true; return; }
   pushInFlight = true;
   try{
-    await DB.doc('data/users/'+UID+'/gamedata').set(collectSyncPayload());
+    const ref = DB.doc('data/users/'+UID+'/gamedata');
+    let existing = {};
+    try{ const snap = await ref.get(); if(snap.exists) existing = snap.data()||{}; }catch(e){}
+    const saves = existing.saves || {};
+    saves[ns()] = collectSyncPayload();
+    await ref.set({ saves, currentNickname: ns(), updatedAt: new Date().toISOString() });
   }catch(e){ /* 저장 실패 시 다음 변경 때 재시도 */ }
   pushInFlight = false;
   if(pushQueued){ pushQueued=false; pushNow(); }
@@ -264,16 +277,15 @@ function schedulePush(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(pushNow, 800);
 }
-function applySyncPayload(data){
+function applySyncPayloadForNick(nick, data){
   if(!data) return;
   if(data.teams) for(const t in data.teams){
     const td = data.teams[t];
-    for(const pref in td) localStorage.setItem(pref+t, td[pref]);
+    for(const pref in td) localStorage.setItem(pref+nick+'_'+t, td[pref]);
   }
-  if(data.owned) localStorage.setItem('sn_owned', data.owned);
-  if(data.onboarded) localStorage.setItem('sn_onboarded', data.onboarded);
-  if(data.nickname && !localStorage.getItem('sn_nickname')){ localStorage.setItem('sn_nickname', data.nickname); hideNicknameGate(); }
-  if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team', team); }
+  if(data.owned) localStorage.setItem('sn_owned_'+nick, data.owned);
+  if(data.onboarded) localStorage.setItem('sn_onboarded_'+nick, data.onboarded);
+  if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team_'+nick, team); }
 }
 let CLOUD_SYNC_STATUS = '확인 중...';
 async function initCloudSync(){
@@ -287,13 +299,18 @@ async function initCloudSync(){
     DB = db;
     const snap = await DB.doc('data/users/'+UID+'/gamedata').get();
     if(snap.exists){
-      applySyncPayload(snap.data());
-      lineup = loadLineupObjs();
-      pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
-      const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
-      document.documentElement.style.setProperty('--tc', TC[team]);
-      refreshCurrencyDisplay(); renderHome();
-      triggerOnboarding(team);
+      const cloud = snap.data();
+      let nick = getNickname();
+      if(!nick && cloud.currentNickname){ nick = cloud.currentNickname; setNickname(nick); hideNicknameGate(); }
+      if(nick && cloud.saves && cloud.saves[nick]){
+        applySyncPayloadForNick(nick, cloud.saves[nick]);
+        lineup = loadLineupObjs();
+        pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
+        const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
+        document.documentElement.style.setProperty('--tc', TC[team]);
+        refreshCurrencyDisplay(); renderHome();
+        if(!showTeamPickIfNeeded()) triggerOnboarding(team);
+      }
     }
     DB_READY = true;
     CLOUD_SYNC_STATUS = '정상 연결됨 (UID: '+UID+')';
@@ -337,7 +354,7 @@ async function claimTeam(code, name){
     const snap = await ref.get();
     if(snap.exists && snap.data().ownerId && snap.data().ownerId!==UID){ alert('방금 다른 사람이 먼저 등록했어요.'); renderLeagueTeams(); return; }
     await ref.set({ownerId: UID, nickname: getNickname()||'익명'});
-    team = name; localStorage.setItem('sn_team', team);
+    team = name; localStorage.setItem('sn_team_'+ns(), team);
     lineup = loadLineupObjs(); pitcherLineup = loadPitcherLineup(); selPitcherSlot=null;
     const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
     refreshCurrencyDisplay(); renderHome(); schedulePush();
@@ -359,13 +376,13 @@ async function releaseTeam(code){
 
 // ===== 화폐 =====
 function getCurrency(){
-  const raw = localStorage.getItem('sn_currency_'+team);
-  if(raw===null){ localStorage.setItem('sn_currency_'+team,'1000'); return 1000; }
+  const raw = localStorage.getItem('sn_currency_'+ns()+'_'+team);
+  if(raw===null){ localStorage.setItem('sn_currency_'+ns()+'_'+team,'1000'); return 1000; }
   return parseInt(raw,10);
 }
 function addCurrency(amount){
   const cur = getCurrency() + amount;
-  localStorage.setItem('sn_currency_'+team, String(cur));
+  localStorage.setItem('sn_currency_'+ns()+'_'+team, String(cur));
   const disp = document.getElementById('currencyDisplay'); if(disp) disp.textContent = cur+'냥';
   schedulePush();
   return cur;
@@ -385,7 +402,7 @@ function renderTeamPickGrid(){
   grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled" data-team="${t}"><div class="av" style="background:linear-gradient(135deg,${TC[t]},#0a1530)">${t[0]}</div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
   grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{
     const t = el.dataset.team;
-    team = t; localStorage.setItem('sn_team', team);
+    team = t; localStorage.setItem('sn_team_'+ns(), team);
     const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
     hideTeamPickPage();
     triggerOnboarding(team);
@@ -415,17 +432,17 @@ document.getElementById('nicknameStartBtn').addEventListener('click', ()=>{
 document.getElementById('nicknameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('nicknameStartBtn').click(); });
 showNicknameGateIfNeeded();
 function getTickets(){
-  const raw = localStorage.getItem('sn_tickets_'+team);
+  const raw = localStorage.getItem('sn_tickets_'+ns()+'_'+team);
   return raw===null? 0 : parseInt(raw,10);
 }
 function addTickets(amount){
   const cur = getTickets() + amount;
-  localStorage.setItem('sn_tickets_'+team, String(cur));
+  localStorage.setItem('sn_tickets_'+ns()+'_'+team, String(cur));
   schedulePush();
   return cur;
 }
-function loadOnboarded(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_onboarded')||'[]')); }catch(e){ return new Set(); } }
-function saveOnboarded(s){ try{ localStorage.setItem('sn_onboarded', JSON.stringify([...s])); }catch(e){} schedulePush(); }
+function loadOnboarded(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_onboarded_'+ns())||'[]')); }catch(e){ return new Set(); } }
+function saveOnboarded(s){ try{ localStorage.setItem('sn_onboarded_'+ns(), JSON.stringify([...s])); }catch(e){} schedulePush(); }
 function guaranteedGlobalPulls(n){
   const highPool = CARDS.filter(c=>c.cost>=7);
   const picked = [];
@@ -504,9 +521,9 @@ function triggerOnboarding(t){
   document.getElementById('overlay').classList.add('active');
 }
 
-function saveLineup(){ try{ localStorage.setItem('sn_lineup_'+team, JSON.stringify(lineup.map(c=>c?pkey(c):null))); }catch(e){} schedulePush(); }
+function saveLineup(){ try{ localStorage.setItem('sn_lineup_'+ns()+'_'+team, JSON.stringify(lineup.map(c=>c?pkey(c):null))); }catch(e){} schedulePush(); }
 function loadLineupObjs(){
-  const raw = localStorage.getItem('sn_lineup_'+team);
+  const raw = localStorage.getItem('sn_lineup_'+ns()+'_'+team);
   if(!raw) return null;
   const keys = JSON.parse(raw);
   return keys.map(k => k? CARDS.find(c=>pkey(c)===k && c.pos==='타자') : null);
@@ -537,7 +554,7 @@ const teamSel = document.getElementById('teamSel');
 teamSel.innerHTML = TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
 teamSel.value = team;
 teamSel.addEventListener('change', e=>{
-  team = e.target.value; localStorage.setItem('sn_team', team);
+  team = e.target.value; localStorage.setItem('sn_team_'+ns(), team);
   lineup = loadLineupObjs();
   pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
   refreshCurrencyDisplay();
@@ -630,8 +647,8 @@ function loadGameStats(){
 function saveGameStats(gs){ try{ localStorage.setItem('sn_gamestats', JSON.stringify(gs)); }catch(e){} }
 let GS = loadGameStats();
 function pkey(c){ return c.team+'|'+c.name; }
-function loadOwned(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_owned')||'[]')); }catch(e){ return new Set(); } }
-function saveOwned(s){ try{ localStorage.setItem('sn_owned', JSON.stringify([...s])); }catch(e){} schedulePush(); }
+function loadOwned(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_owned_'+ns())||'[]')); }catch(e){ return new Set(); } }
+function saveOwned(s){ try{ localStorage.setItem('sn_owned_'+ns(), JSON.stringify([...s])); }catch(e){} schedulePush(); }
 function addOwned(c){ const s=loadOwned(); s.add(pkey(c)); saveOwned(s); }
 function tallyPlay(batter, pitcher, outcome, runs){
   const bk = pkey(batter);
@@ -1097,11 +1114,11 @@ let selPitcherSlot = null;
 function emptyPitcherLineup(){ return {starters:new Array(5).fill(null), middle:new Array(4).fill(null), setup:[null], closer:[null]}; }
 function savePitcherLineup(){
   const out = {}; for(const k in pitcherLineup) out[k]=pitcherLineup[k].map(c=>c?pkey(c):null);
-  try{ localStorage.setItem('sn_pitchers_'+team, JSON.stringify(out)); }catch(e){}
+  try{ localStorage.setItem('sn_pitchers_'+ns()+'_'+team, JSON.stringify(out)); }catch(e){}
   schedulePush();
 }
 function loadPitcherLineup(){
-  const raw = localStorage.getItem('sn_pitchers_'+team);
+  const raw = localStorage.getItem('sn_pitchers_'+ns()+'_'+team);
   if(!raw) return emptyPitcherLineup();
   const keys = JSON.parse(raw);
   const out = {};
@@ -1183,14 +1200,14 @@ function genBlock(){
   const amount = randInt(chosen[2][0], chosen[2][1]);
   return {id:'b'+Date.now()+Math.random().toString(36).slice(2,7), stat, amount, rarity:chosen[0], forBatter:isB};
 }
-function loadBlocks(){ try{ return JSON.parse(localStorage.getItem('sn_blocks_'+team)||'[]'); }catch(e){ return []; } }
-function saveBlocks(list){ try{ localStorage.setItem('sn_blocks_'+team, JSON.stringify(list)); }catch(e){} schedulePush(); }
-function loadEquips(){ try{ return JSON.parse(localStorage.getItem('sn_equip_'+team)||'{}'); }catch(e){ return {}; } }
-function saveEquips(o){ try{ localStorage.setItem('sn_equip_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
-function loadTrainPerm(){ try{ return JSON.parse(localStorage.getItem('sn_permboost_'+team)||'{}'); }catch(e){ return {}; } }
-function saveTrainPerm(o){ try{ localStorage.setItem('sn_permboost_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
-function loadAbroad(){ try{ return JSON.parse(localStorage.getItem('sn_abroad_'+team)||'{}'); }catch(e){ return {}; } }
-function saveAbroad(o){ try{ localStorage.setItem('sn_abroad_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
+function loadBlocks(){ try{ return JSON.parse(localStorage.getItem('sn_blocks_'+ns()+'_'+team)||'[]'); }catch(e){ return []; } }
+function saveBlocks(list){ try{ localStorage.setItem('sn_blocks_'+ns()+'_'+team, JSON.stringify(list)); }catch(e){} schedulePush(); }
+function loadEquips(){ try{ return JSON.parse(localStorage.getItem('sn_equip_'+ns()+'_'+team)||'{}'); }catch(e){ return {}; } }
+function saveEquips(o){ try{ localStorage.setItem('sn_equip_'+ns()+'_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
+function loadTrainPerm(){ try{ return JSON.parse(localStorage.getItem('sn_permboost_'+ns()+'_'+team)||'{}'); }catch(e){ return {}; } }
+function saveTrainPerm(o){ try{ localStorage.setItem('sn_permboost_'+ns()+'_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
+function loadAbroad(){ try{ return JSON.parse(localStorage.getItem('sn_abroad_'+ns()+'_'+team)||'{}'); }catch(e){ return {}; } }
+function saveAbroad(o){ try{ localStorage.setItem('sn_abroad_'+ns()+'_'+team, JSON.stringify(o)); }catch(e){} schedulePush(); }
 
 function cardBonusMap(cardName){
   const equips = loadEquips(); const blocks = loadBlocks();
@@ -1361,14 +1378,32 @@ function starsHTML(cost){
   return `<span style="letter-spacing:1px">${s}</span> <b>${cost}</b>`;
 }
 const RARITY_COLOR = {'일반':'#8b93a3','레어':'#2b7de9','에이스':'#8b3fd4','레전드':'#d4a94b'};
+const TEAM_MASCOT = {'삼성':'🦁','KT':'🧙','LG':'⭐','KIA':'🐯','두산':'🐻','NC':'🦖','SSG':'🚀','롯데':'🐦','한화':'🦅','키움':'🦸'};
+const FIELD_POSITIONS = ['포수','1루수','2루수','3루수','유격수','좌익수','중견수','우익수'];
+function hashVal(str){ let h=0; for(let i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))>>>0; } return 40+(h%55); }
+function letterGrade(v){ if(v>=90) return 'S'; if(v>=80) return 'A'; if(v>=65) return 'B'; if(v>=50) return 'C'; return 'D'; }
+function positionGradesHTML(c){
+  const defStat = c.stats.find(s=>s[0]==='수비'); const defVal = defStat?defStat[1]:50;
+  const rows = FIELD_POSITIONS.map(pos=>{
+    const v = pos===c.fieldpos ? defVal : hashVal(c.name+pos);
+    return {pos, grade:letterGrade(v)};
+  });
+  return `<div style="font-size:10px; color:var(--gold); font-weight:700; margin:8px 0 4px">포지션별 수비등급 <span style="color:var(--sub); font-weight:400">(주포지션 외 추정치)</span></div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:10px">
+      ${rows.map(r=>`<div style="text-align:center; background:#f5f7fa; border-radius:6px; padding:4px 2px"><div style="font-size:9px; color:var(--sub)">${r.pos}</div><div style="font-size:13px; font-weight:800; color:${r.pos===c.fieldpos?'var(--gold)':'var(--ink)'}">${r.grade}</div></div>`).join('')}
+    </div>`;
+}
 function cardFrontHTML(c){
   const isB = c.stats[0][0]==='파워';
   const posLabel = isB ? (c.fieldpos||'타자') : c.pos;
-  return `<div class="flipcard" style="background:${TC[c.team]}">
+  const corners = c.rarity==='레전드' ? `<span class="corner" style="top:6px; left:6px">✦</span><span class="corner" style="bottom:6px; right:6px">✦</span>` : (c.rarity==='에이스' ? `<span class="corner" style="top:6px; left:6px">✧</span>` : '');
+  return `<div class="flipcard rarity-${c.rarity}" style="background:${TC[c.team]}">
     <div class="fav" style="background:linear-gradient(160deg,${TC[c.team]},#0a1530)">
+      <div class="mascot-bg">${TEAM_MASCOT[c.team]||''}</div>
+      ${corners}
       <div class="fbanner" style="background:${RARITY_COLOR[c.rarity]}">${c.rarity}</div>
       <div class="fnum">${c.overall}</div>
-      ${c.name[0]}
+      <span style="position:relative">${c.name[0]}</span>
     </div>
     <div class="fbody">
       <div class="fname">${c.name}</div>
@@ -1389,7 +1424,7 @@ function cardBackHTML(c){
     ? `<tr><td>${gsl.pa||0}</td><td>${(gsl.avg||0).toFixed(3)}</td><td>${gsl.hr||0}</td><td>${gsl.rbi||0}</td></tr>`
     : `<tr><td>${gsl.g||0}</td><td>${(gsl.era||0).toFixed(2)}</td><td>${(gsl.ip||0).toFixed(1)}</td><td>${gsl.so||0}</td></tr>`;
   const gsHeads = isB ? ['PA','AVG','HR','RBI'] : ['G','ERA','IP','SO'];
-  return `<div class="flipcard" style="background:#fff">
+  return `<div class="flipcard rarity-${c.rarity}" style="background:#fff">
     <div class="fbody" style="padding-top:16px">
       <div class="fname">${c.name} <span style="font-size:11px; color:var(--sub); font-weight:400">시즌 성적</span></div>
       <div class="fteam">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</div>
@@ -1398,10 +1433,11 @@ function cardBackHTML(c){
         ${seasonRow.replace(/<td>/g,'<td style="padding:4px 2px; border-bottom:1px solid #f5f7fa">')}
       </table>
       <div style="font-size:10px; color:var(--gold); font-weight:700; margin-bottom:3px">인게임 시즌 성적</div>
-      <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:10px">
+      <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px">
         <tr style="color:var(--sub)">${gsHeads.map(h=>`<th style="text-align:left; padding:4px 2px; border-bottom:1px solid #eef1f6">${h}</th>`).join('')}</tr>
         ${gsRow.replace(/<td>/g,'<td style="padding:4px 2px; border-bottom:1px solid #f5f7fa">')}
       </table>
+      ${isB ? positionGradesHTML(c) : ''}
       ${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${v}%; background:${RARITY_COLOR[c.rarity]}"></div></div><div class="val" style="color:var(--ink)">${v}</div></div>`).join('')}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
     </div>
