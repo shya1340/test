@@ -123,6 +123,14 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
     <div class="loginFuture">이메일·비밀번호 회원가입은 준비 중이에요. 지금은 닉네임만으로 계정과 연결돼 진행 상황이 저장돼요.</div>
   </div>
 </div>
+<div class="loginpage" id="teamPickPage">
+  <div class="logincard" style="max-width:420px">
+    <div class="loginlogo">⚾</div>
+    <h1 class="loginTitle">감독할 팀을 선택하세요</h1>
+    <p class="loginSub">선택한 팀에서만 시작 선수를 고르고 초반 영입을 진행해요</p>
+    <div class="orderrow" id="teamPickGrid" style="justify-content:center; flex-wrap:wrap; overflow:visible"></div>
+  </div>
+</div>
 <div class="wrap">
 <header>
 <div class="brand">다이아몬드 크로니클</div>
@@ -367,11 +375,32 @@ function hideNicknameGate(){ const g = document.getElementById('nicknameGate'); 
 function showNicknameGateIfNeeded(){
   if(getNickname()) hideNicknameGate();
 }
+function hideTeamPickPage(){ const g = document.getElementById('teamPickPage'); if(g) g.classList.remove('active'); }
+function renderTeamPickGrid(){
+  const grid = document.getElementById('teamPickGrid');
+  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled" data-team="${t}"><div class="av" style="background:linear-gradient(135deg,${TC[t]},#0a1530)">${t[0]}</div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
+  grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{
+    const t = el.dataset.team;
+    team = t; localStorage.setItem('sn_team', team);
+    const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
+    hideTeamPickPage();
+    triggerOnboarding(team);
+  }));
+}
+function showTeamPickIfNeeded(){
+  if(loadOnboarded().size===0){
+    renderTeamPickGrid();
+    document.getElementById('teamPickPage').classList.add('active');
+    return true;
+  }
+  return false;
+}
 document.getElementById('nicknameStartBtn').addEventListener('click', ()=>{
   const v = document.getElementById('nicknameInput').value.trim();
   if(!v){ alert('닉네임을 입력해주세요.'); return; }
   setNickname(v);
   hideNicknameGate();
+  if(!showTeamPickIfNeeded()) triggerOnboarding(team);
 });
 document.getElementById('nicknameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('nicknameStartBtn').click(); });
 showNicknameGateIfNeeded();
@@ -387,13 +416,49 @@ function addTickets(amount){
 }
 function loadOnboarded(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_onboarded')||'[]')); }catch(e){ return new Set(); } }
 function saveOnboarded(s){ try{ localStorage.setItem('sn_onboarded', JSON.stringify([...s])); }catch(e){} schedulePush(); }
+function guaranteedGlobalPulls(n){
+  const highPool = CARDS.filter(c=>c.cost>=7);
+  const picked = [];
+  const batches = Math.ceil(n/10);
+  for(let b=0; b<batches; b++){
+    const batchSize = Math.min(10, n-picked.length);
+    const guaranteed = highPool[Math.floor(Math.random()*highPool.length)];
+    const rest = [];
+    for(let i=1;i<batchSize;i++) rest.push(pullCardOnce());
+    const batch = [guaranteed, ...rest].sort(()=>Math.random()-0.5);
+    picked.push(...batch);
+  }
+  return picked.slice(0, n);
+}
 function finishOnboarding(t, pickedB, pickedP){
   if(pickedB) addOwned(pickedB);
   if(pickedP) addOwned(pickedP);
-  addTickets(30);
+  const pulled = guaranteedGlobalPulls(30);
+  pulled.forEach(addOwned);
   const done = loadOnboarded(); done.add(t); saveOnboarded(done);
-  document.getElementById('overlay').classList.remove('active');
-  renderHome(); renderTraining(); renderShop();
+  let idx = 0;
+  function showReveal(){
+    const chunk = pulled.slice(idx, idx+6);
+    const rc = {'일반':'#8b93a3','레어':'#2b7de9','에이스':'#8b3fd4','레전드':'#d4a94b'};
+    document.getElementById('modalBody').innerHTML = `
+      <h3>${t} 입단 축하 영입! (${Math.min(idx+6,30)}/30)</h3>
+      <div style="font-size:12px; color:var(--sub); margin-bottom:8px">뽑기권 30장을 모두 사용해 초반 로스터를 채웠어요</div>
+      <div class="grid">${chunk.map(c=>{
+        const isB = c.stats[0][0]==='파워';
+        return `<div class="card" style="background:${TC[c.team]}; border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}">${c.rarity}</div><div class="name">${c.name}</div></div><div class="body2" style="font-size:10px">${isB?(c.fieldpos||'타자'):c.pos}</div></div>`;
+      }).join('')}</div>
+      <button class="btn" style="margin-top:14px; width:100%" id="onboardNext">${idx+6<30?'다음':'게임 시작하기'}</button>
+    `;
+    document.getElementById('onboardNext').addEventListener('click', ()=>{
+      idx += 6;
+      if(idx < 30) showReveal();
+      else{
+        document.getElementById('overlay').classList.remove('active');
+        refreshCurrencyDisplay(); renderHome(); renderTraining(); renderShop();
+      }
+    });
+  }
+  showReveal();
 }
 function triggerOnboarding(t){
   const done = loadOnboarded();
@@ -1416,7 +1481,9 @@ document.getElementById('goLeaderboard').addEventListener('click', async ()=>{
 });
 refreshCurrencyDisplay();
 renderHome();
-triggerOnboarding(team);
+if(getNickname()){
+  if(!showTeamPickIfNeeded()) triggerOnboarding(team);
+}
 </script>
 </body>
 </html>
