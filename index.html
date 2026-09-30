@@ -185,6 +185,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <h3 style="margin:0 0 4px">뽑기권으로 선수 영입</h3>
 <div class="sub2">입단 시 지급된 뽑기권 1장당 1회, 화폐 대신 사용해요</div>
 <button class="btn" style="margin-top:10px; background:#fff; color:#0a5c3a" id="ticketGachaBtn">1회 뽑기 (뽑기권 1장)</button>
+<button class="btn ghost" style="margin-top:10px; margin-left:8px; border-color:#fff; color:#fff" id="ticketGacha10Btn">10회 뽑기 (뽑기권 10장)</button>
 </div>
 <div class="card-mini" style="background:linear-gradient(135deg,var(--navy),#1c5cc4)">
 <h3 style="margin:0 0 4px">선수 카드 뽑기</h3>
@@ -1242,6 +1243,13 @@ document.getElementById('ticketGachaBtn').addEventListener('click', ()=>{
   const c = pullCardOnce();
   addOwned(c);
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>뽑기권으로 영입</h3>${cardResultHTML(c)}`);
+});
+document.getElementById('ticketGacha10Btn').addEventListener('click', ()=>{
+  if(getTickets()<10){ alert('뽑기권이 부족해요.'); return; }
+  addTickets(-10); renderShop();
+  const list = Array.from({length:10}, pullCardOnce);
+  list.forEach(addOwned);
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>뽑기권으로 영입 (10회)</h3>${list.map(cardResultHTML).join('')}`);
 });
 document.getElementById('shopGachaBtn').addEventListener('click', ()=>{
   if(getCurrency()<GACHA_COST){ alert('화폐가 부족해요.'); return; }
