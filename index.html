@@ -76,6 +76,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .costbar .item b{font-size:16px; color:var(--navy);}
 .orderrow{display:flex; flex-direction:row; gap:8px; overflow-x:auto; padding-bottom:6px;}
 .minicard{flex-shrink:0; width:78px; border-radius:10px; overflow:hidden; cursor:pointer; border:2px solid #eef1f6; background:#fafbfd; text-align:center; font-size:10px; position:relative;}
+.minicard.dragover{border-color:var(--gold); box-shadow:0 0 0 3px rgba(212,169,75,.35);}
 .minicard.filled{border-color:var(--tc);}
 .minicard .av{width:100%; aspect-ratio:1/1; background:linear-gradient(135deg,var(--tc),#0a1530); color:#fff; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:800;}
 .minicard .badge{position:absolute; top:2px; left:2px; font-size:8.5px; background:rgba(0,0,0,.4); color:#fff; padding:1px 4px; border-radius:6px;}
@@ -176,10 +177,13 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 
 <div class="view" id="view-lineup">
 <div class="costbar" id="costBar"></div>
-<h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 우클릭하면 카드가 커져요)</h2>
+<h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 드래그로 배치 · 우클릭하면 카드가 커져요)</h2>
 <div class="slots orderrow" id="slots"></div>
 <button class="btn ghost" id="resetBtn" style="margin-top:10px">초기화</button>
-<h2 class="sec" id="poolTitle">벤치 / 대기 명단</h2>
+<h2 class="sec" id="benchTitle">벤치 (경기 로스터 · 클릭해서 뺄 수 있어요)</h2>
+<div class="pool orderrow" id="benchPool"></div>
+<h2 class="sec" id="poolTitle">대기 명단 (보유 카드 전체 · 클릭하면 벤치로)</h2>
+<div id="posFilterBar" style="display:flex; gap:4px; overflow-x:auto; margin-bottom:8px"></div>
 <div class="pool orderrow" id="pool"></div>
 
 <h2 class="sec" style="margin-top:26px">투수진 (슬롯을 먼저 클릭 → 아래 명단에서 선수 클릭 · 우클릭하면 카드가 커져요)</h2>
@@ -245,7 +249,7 @@ let lineup = JSON.parse(localStorage.getItem('sn_lineup_'+ns()+'_'+team) || 'nul
 
 // ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
 let DB = null, UID = null, DB_READY = false, pushTimer = null, pushInFlight = false, pushQueued = false;
-const PERSONAL_TEAM_KEYS = ['sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_'];
+const PERSONAL_TEAM_KEYS = ['sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
 function ns(){ return getNickname() || 'guest'; }
 function collectSyncPayload(){
   const nick = ns();
@@ -526,7 +530,7 @@ function loadLineupObjs(){
   const raw = localStorage.getItem('sn_lineup_'+ns()+'_'+team);
   if(!raw) return null;
   const keys = JSON.parse(raw);
-  return keys.map(k => k? CARDS.find(c=>pkey(c)===k && c.pos==='타자') : null);
+  return keys.map(k => k? CARDS.find(c=>pkey(c)===migrateKey(k) && c.pos==='타자') : null);
 }
 function currentLineup(){
   const l = loadLineupObjs();
@@ -646,8 +650,16 @@ function loadGameStats(){
 }
 function saveGameStats(gs){ try{ localStorage.setItem('sn_gamestats', JSON.stringify(gs)); }catch(e){} }
 let GS = loadGameStats();
-function pkey(c){ return c.team+'|'+c.name; }
-function loadOwned(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_owned_'+ns())||'[]')); }catch(e){ return new Set(); } }
+function pkey(c){ return c.team+'|'+c.name+'|'+c.pos+'|'+(c.fieldpos||''); }
+function migrateKey(k){
+  if(!k) return k;
+  const parts = k.split('|');
+  if(parts.length>=4) return k; // 이미 신규 포맷
+  const [t,n] = parts;
+  const matches = CARDS.filter(c=>c.team===t && c.name===n);
+  return matches.length===1 ? pkey(matches[0]) : k; // 동명이인처럼 모호하면 구포맷 그대로 둠(더는 매칭 안 됨)
+}
+function loadOwned(){ try{ const raw = JSON.parse(localStorage.getItem('sn_owned_'+ns())||'[]'); return new Set(raw.map(migrateKey)); }catch(e){ return new Set(); } }
 function saveOwned(s){ try{ localStorage.setItem('sn_owned_'+ns(), JSON.stringify([...s])); }catch(e){} schedulePush(); }
 function addOwned(c){ const s=loadOwned(); s.add(pkey(c)); saveOwned(s); }
 function tallyPlay(batter, pitcher, outcome, runs){
@@ -1082,25 +1094,68 @@ function renderCostBar(){
     <div class="item">투수<b>${pitTotal}</b></div>
     <div class="item">레전드<b>${legendCount}</b></div>`;
 }
+function loadBench(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_bench_'+ns()+'_'+team)||'[]')); }catch(e){ return new Set(); } }
+function saveBench(s){ try{ localStorage.setItem('sn_bench_'+ns()+'_'+team, JSON.stringify([...s])); }catch(e){} schedulePush(); }
+let waitPosFilter = '전체';
 function renderLineup(){
   document.documentElement.style.setProperty('--tc', TC[team]);
   if(!lineup || lineup.length!==9) lineup = new Array(9).fill(null);
   const slotsDiv = document.getElementById('slots');
   slotsDiv.innerHTML = lineup.map((c,i)=>batterMiniCard(c, `data-i="${i}"`)).join('');
-  slotsDiv.querySelectorAll('.minicard.filled').forEach(el=>el.addEventListener('click', ()=>{ lineup[+el.dataset.i]=null; saveLineup(); renderLineup(); }));
+  slotsDiv.querySelectorAll('.minicard').forEach(el=>{
+    el.addEventListener('click', ()=>{ if(el.classList.contains('filled')){ lineup[+el.dataset.i]=null; saveLineup(); renderLineup(); } });
+    el.addEventListener('dragover', e=>{ e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', ()=>el.classList.remove('dragover'));
+    el.addEventListener('drop', e=>{
+      e.preventDefault(); el.classList.remove('dragover');
+      const k = e.dataTransfer.getData('text/plain'); if(!k) return;
+      const c = CARDS.find(x=>pkey(x)===k); if(!c) return;
+      const dupIdx = lineup.findIndex(x=>x && pkey(x)===k); if(dupIdx>-1) lineup[dupIdx]=null;
+      lineup[+el.dataset.i] = c; saveLineup(); renderLineup(); renderHome();
+    });
+  });
   attachFlip(slotsDiv);
   const owned = loadOwned();
   const poolAll = CARDS.filter(c=>c.pos==='타자' && owned.has(pkey(c)));
-  const used = new Set(lineup.filter(Boolean).map(pkey));
-  const remain = poolAll.filter(c=>!used.has(pkey(c)));
-  document.getElementById('poolTitle').textContent = `벤치 / 대기 명단 (${remain.length}명 · 타순 ${lineup.filter(Boolean).length}/9)`;
+  const usedInLineup = new Set(lineup.filter(Boolean).map(pkey));
+  const bench = loadBench();
+  const benchCards = poolAll.filter(c=>bench.has(pkey(c)) && !usedInLineup.has(pkey(c)));
+  let waitCards = poolAll.filter(c=>!bench.has(pkey(c)) && !usedInLineup.has(pkey(c)));
+  if(waitPosFilter!=='전체') waitCards = waitCards.filter(c=>(c.fieldpos||'')===waitPosFilter);
+
+  document.getElementById('benchTitle').textContent = `벤치 (경기 로스터 · 클릭해서 뺄 수 있어요) — ${benchCards.length}명`;
+  const benchDiv = document.getElementById('benchPool');
+  benchDiv.innerHTML = benchCards.map(c=>batterMiniCard(c, `data-n="${pkey(c)}" draggable="true"`)).join('');
+  benchDiv.addEventListener('dragover', e=>{ e.preventDefault(); benchDiv.classList.add('dragover'); });
+  benchDiv.addEventListener('dragleave', ()=>benchDiv.classList.remove('dragover'));
+  benchDiv.addEventListener('drop', e=>{
+    e.preventDefault(); benchDiv.classList.remove('dragover');
+    const k = e.dataTransfer.getData('text/plain'); if(!k) return;
+    const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
+    const dupIdx = lineup.findIndex(x=>x && pkey(x)===k); if(dupIdx>-1){ lineup[dupIdx]=null; saveLineup(); }
+    const b = loadBench(); b.add(pkey(c)); saveBench(b); renderLineup(); renderHome();
+  });
+  benchDiv.querySelectorAll('.minicard.filled').forEach(el=>{
+    el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
+    el.addEventListener('click', ()=>{
+      const b = loadBench(); b.delete(el.dataset.n); saveBench(b); renderLineup();
+    });
+  });
+
+  const filterBar = document.getElementById('posFilterBar');
+  filterBar.innerHTML = ['전체', ...FIELD_POSITIONS].map(p=>`<button class="btn ghost" data-fp="${p}" style="padding:5px 10px; font-size:11px; white-space:nowrap; ${p===waitPosFilter?'background:var(--navy); color:#fff':''}">${p}</button>`).join('');
+  filterBar.querySelectorAll('[data-fp]').forEach(el=>el.addEventListener('click', ()=>{ waitPosFilter = el.dataset.fp; renderLineup(); }));
+
+  document.getElementById('poolTitle').textContent = `대기 명단 (보유 카드 전체 · 클릭하면 벤치로) — ${waitCards.length}명 · 타순 ${lineup.filter(Boolean).length}/9`;
   const poolDiv = document.getElementById('pool');
-  poolDiv.innerHTML = remain.map(c=>batterMiniCard(c, `data-n="${pkey(c)}"`)).join('');
-  poolDiv.querySelectorAll('.minicard.filled').forEach(el=>el.addEventListener('click', ()=>{
-    const i = lineup.findIndex(x=>x===null); if(i===-1) return;
-    lineup[i] = poolAll.find(c=>pkey(c)===el.dataset.n); saveLineup(); renderLineup(); renderHome();
-  }));
-  attachFlip(poolDiv);
+  poolDiv.innerHTML = waitCards.map(c=>batterMiniCard(c, `data-n="${pkey(c)}" draggable="true"`)).join('');
+  poolDiv.querySelectorAll('.minicard.filled').forEach(el=>{
+    el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
+    el.addEventListener('click', ()=>{
+      const b = loadBench(); b.add(el.dataset.n); saveBench(b); renderLineup();
+    });
+  });
+  attachFlip(benchDiv); attachFlip(poolDiv);
   renderCostBar();
 }
 document.getElementById('resetBtn').addEventListener('click', ()=>{ lineup=new Array(9).fill(null); saveLineup(); renderLineup(); renderHome(); });
@@ -1122,7 +1177,7 @@ function loadPitcherLineup(){
   if(!raw) return emptyPitcherLineup();
   const keys = JSON.parse(raw);
   const out = {};
-  for(const k of ['starters','middle','setup','closer']) out[k] = (keys[k]||[]).map(key=> key? CARDS.find(c=>pkey(c)===key): null);
+  for(const k of ['starters','middle','setup','closer']) out[k] = (keys[k]||[]).map(key=> key? CARDS.find(c=>pkey(c)===migrateKey(key)): null);
   return out;
 }
 function pitcherStaffComplete(pl){
@@ -1137,6 +1192,18 @@ function pitcherMiniCard(c, extraAttrs){
   const other = c.team!==team;
   return `<div class="minicard filled" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av" style="background:linear-gradient(135deg,${TC[c.team]},#0a1530)">${c.name[0]}</div>
     <div class="info"><div class="nm">${c.name}</div><div class="ps">${c.pos}${other?' · '+c.team:''}</div><div class="cst">★${c.cost}</div></div></div>`;
+}
+function assignPitcherToSlot(c, cat, i){
+  if(c.pos==='선발' && cat!=='starters'){
+    if(!confirm(`${c.name}은(는) 선발 투수예요. 불펜(${ROLE_LABELS[cat]})으로 기용하면 능력치가 15% 하락해요. 그래도 배치할까요?`)) return false;
+  }
+  for(const k of ['starters','middle','setup','closer']){
+    const idx = pitcherLineup[k].findIndex(x=>x && pkey(x)===pkey(c));
+    if(idx>-1) pitcherLineup[k][idx]=null;
+  }
+  pitcherLineup[cat][i] = c;
+  savePitcherLineup(); renderPitchers(); renderCostBar();
+  return true;
 }
 function renderPitchers(){
   if(!pitcherLineup) pitcherLineup = loadPitcherLineup();
@@ -1162,25 +1229,37 @@ function renderPitchers(){
     }
   }
   slotsDiv.innerHTML = html;
-  slotsDiv.querySelectorAll('.minicard').forEach(el=>el.addEventListener('click', ()=>{
+  slotsDiv.querySelectorAll('.minicard').forEach(el=>{
     const cat = el.dataset.cat, i = +el.dataset.i;
-    if(pitcherLineup[cat][i]){ pitcherLineup[cat][i]=null; selPitcherSlot=null; savePitcherLineup(); renderPitchers(); renderCostBar(); return; }
-    selPitcherSlot = {cat, i}; renderPitchers();
-  }));
+    el.addEventListener('click', ()=>{
+      if(pitcherLineup[cat][i]){ pitcherLineup[cat][i]=null; selPitcherSlot=null; savePitcherLineup(); renderPitchers(); renderCostBar(); return; }
+      selPitcherSlot = {cat, i}; renderPitchers();
+    });
+    el.addEventListener('dragover', e=>{ e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', ()=>el.classList.remove('dragover'));
+    el.addEventListener('drop', e=>{
+      e.preventDefault(); el.classList.remove('dragover');
+      const k = e.dataTransfer.getData('text/plain'); if(!k) return;
+      const c = CARDS.find(x=>pkey(x)===k); if(!c) return;
+      assignPitcherToSlot(c, cat, i);
+    });
+  });
   attachFlip(slotsDiv);
   const owned = loadOwned();
   const allP = CARDS.filter(c=>c.pos!=='타자' && owned.has(pkey(c)));
   const used = new Set(['starters','middle','setup','closer'].flatMap(k=>pitcherLineup[k].filter(Boolean).map(pkey)));
   const remain = allP.filter(c=>!used.has(pkey(c)));
-  document.getElementById('pitcherPoolTitle').textContent = `투수 대기 명단 (${remain.length}명)`;
+  document.getElementById('pitcherPoolTitle').textContent = `투수 대기 명단 (${remain.length}명) — 카드를 슬롯으로 끌어다 놓으세요(모바일은 슬롯 선택 후 탭)`;
   const poolDiv = document.getElementById('pitcherPool');
-  poolDiv.innerHTML = remain.map(c=>pitcherMiniCard(c, `data-n="${pkey(c)}"`)).join('');
-  poolDiv.querySelectorAll('.minicard.filled').forEach(el=>el.addEventListener('click', ()=>{
-    if(!selPitcherSlot) return;
-    const c = allP.find(x=>pkey(x)===el.dataset.n);
-    pitcherLineup[selPitcherSlot.cat][selPitcherSlot.i] = c;
-    selPitcherSlot = null; savePitcherLineup(); renderPitchers(); renderCostBar();
-  }));
+  poolDiv.innerHTML = remain.map(c=>pitcherMiniCard(c, `data-n="${pkey(c)}" draggable="true"`)).join('');
+  poolDiv.querySelectorAll('.minicard.filled').forEach(el=>{
+    el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
+    el.addEventListener('click', ()=>{
+      if(!selPitcherSlot) return;
+      const c = allP.find(x=>pkey(x)===el.dataset.n);
+      if(assignPitcherToSlot(c, selPitcherSlot.cat, selPitcherSlot.i)) selPitcherSlot = null;
+    });
+  });
   attachFlip(poolDiv);
   renderCostBar();
 }
@@ -1223,13 +1302,17 @@ function boostedCard(c){
   if(Object.keys(bonus).length===0) return c;
   return {...c, stats: c.stats.map(([l,v])=>[l, Math.min(99, v+(bonus[l]||0))])};
 }
-// lineupFor/staffFor에 훈련 보정 반영
+// lineupFor/staffFor에 훈련 보정 + 선발→불펜 기용 페널티(-15%) 반영
 const _lineupForBase = lineupFor, _staffForBase = staffFor;
 lineupFor = function(t){ return _lineupForBase(t).map(boostedCard); };
+function penalizeIfMisplacedStarter(c, cat){
+  if(!c || cat==='starters' || c.pos!=='선발') return c;
+  return {...c, stats: c.stats.map(([l,v])=>[l, Math.max(1, Math.round(v*0.85))])};
+}
 staffFor = function(t){
   const s = _staffForBase(t);
-  const wrap = arr => arr.map(boostedCard);
-  return {starters:wrap(s.starters), middle:wrap(s.middle), setup:wrap(s.setup), closer:wrap(s.closer)};
+  const wrap = (arr, cat) => arr.map(c => c ? boostedCard(penalizeIfMisplacedStarter(c, cat)) : c);
+  return {starters:wrap(s.starters,'starters'), middle:wrap(s.middle,'middle'), setup:wrap(s.setup,'setup'), closer:wrap(s.closer,'closer')};
 };
 
 
@@ -1393,6 +1476,17 @@ function positionGradesHTML(c){
       ${rows.map(r=>`<div style="text-align:center; background:#f5f7fa; border-radius:6px; padding:4px 2px"><div style="font-size:9px; color:var(--sub)">${r.pos}</div><div style="font-size:13px; font-weight:800; color:${r.pos===c.fieldpos?'var(--gold)':'var(--ink)'}">${r.grade}</div></div>`).join('')}
     </div>`;
 }
+const PITCHER_ROLES = ['선발','중계','셋업','마무리'];
+function pitcherGradesHTML(c){
+  const rows = PITCHER_ROLES.map(role=>{
+    const v = role===c.pos ? c.overall : hashVal(c.name+role);
+    return {role, grade:letterGrade(v)};
+  });
+  return `<div style="font-size:10px; color:var(--gold); font-weight:700; margin:8px 0 4px">보직별 적합도 <span style="color:var(--sub); font-weight:400">(주보직 외 추정치)</span></div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:10px">
+      ${rows.map(r=>`<div style="text-align:center; background:#f5f7fa; border-radius:6px; padding:4px 2px"><div style="font-size:9px; color:var(--sub)">${r.role}</div><div style="font-size:13px; font-weight:800; color:${r.role===c.pos?'var(--gold)':'var(--ink)'}">${r.grade}</div></div>`).join('')}
+    </div>`;
+}
 function cardFrontHTML(c){
   const isB = c.stats[0][0]==='파워';
   const posLabel = isB ? (c.fieldpos||'타자') : c.pos;
@@ -1437,7 +1531,7 @@ function cardBackHTML(c){
         <tr style="color:var(--sub)">${gsHeads.map(h=>`<th style="text-align:left; padding:4px 2px; border-bottom:1px solid #eef1f6">${h}</th>`).join('')}</tr>
         ${gsRow.replace(/<td>/g,'<td style="padding:4px 2px; border-bottom:1px solid #f5f7fa">')}
       </table>
-      ${isB ? positionGradesHTML(c) : ''}
+      ${isB ? positionGradesHTML(c) : pitcherGradesHTML(c)}
       ${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${v}%; background:${RARITY_COLOR[c.rarity]}"></div></div><div class="val" style="color:var(--ink)">${v}</div></div>`).join('')}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
     </div>
