@@ -2016,7 +2016,7 @@ function attachFlip(container){
     });
   });
 }
-function openModal(html){ document.getElementById('modalBody').innerHTML = html; document.getElementById('overlay').classList.add('active'); }
+function openModal(html){ const mb = document.getElementById('modalBody'); mb.style.maxWidth = ''; mb.innerHTML = html; document.getElementById('overlay').classList.add('active'); }
 document.getElementById('overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') document.getElementById('overlay').classList.remove('active'); });
 
 function pullCardOnce(){
@@ -2037,18 +2037,43 @@ function cardResultHTML(c, r){
     <div style="padding:8px 12px 12px; background:rgba(255,255,255,.08); font-size:12px; color:#d4a94b; border-top:1px solid rgba(255,255,255,.1)">COST ${starsHTML(c.cost)}</div>
     </div>`;
 }
+// ===== 카드 도감: 전체/팀별 탭 + 타자·투수·보유 필터 + 코스트 정렬. 회색 = 아직 보유하지 않은 카드 =====
+let DEX = {team:'전체', type:'전체', own:'전체', sort:'desc'};
 function showTeamDex(t){
-  const list = CARDS.filter(c=>c.team===t);
+  if(t) DEX.team = t;
+  const owned = loadOwned();
+  let list = CARDS.filter(c=>DEX.team==='전체' || c.team===DEX.team);
+  const teamTotal = list.length, teamOwned = list.filter(c=>owned.has(pkey(c))).length;
+  if(DEX.type==='타자') list = list.filter(c=>c.pos==='타자');
+  if(DEX.type==='투수') list = list.filter(c=>c.pos!=='타자');
+  if(DEX.own==='보유') list = list.filter(c=>owned.has(pkey(c)));
+  if(DEX.own==='미보유') list = list.filter(c=>!owned.has(pkey(c)));
+  list = list.slice().sort((a,b)=> DEX.sort==='asc' ? a.cost-b.cost || a.overall-b.overall : b.cost-a.cost || b.overall-a.overall);
   const rc = {'일반':'#8b93a3','레어':'#2b7de9','에이스':'#8b3fd4','레전드':'#d4a94b'};
+  const chip = (group, v, on) => `<button class="btn ghost" data-dex="${group}:${v}" style="padding:4px 10px; font-size:11px; white-space:nowrap; ${on?'background:var(--navy); color:#fff':''}">${v}</button>`;
   const items = list.map(c=>{
-    const isB = c.pos==='타자';
-    return `<div class="card ${c.tier==='보관함'?'bench':''}" style="border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}; color:#fff">${c.rarity}${c.tier==='보관함'?' · 보관함':''}</div><div class="name">${c.name}</div></div>
+    const has = owned.has(pkey(c)), dn = has ? dupeCount(c) : 0;
+    const posLbl = c.pos==='타자' ? (c.fieldpos||'타자') : c.pos;
+    return `<div class="card" data-flipname="${pkey(c)}" style="background:${TC[c.team]}; border:2px solid ${rc[c.rarity]}; ${has?'':'filter:grayscale(1); opacity:.55;'}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}; color:#fff">${c.rarity}</div><div class="name">${c.name}</div>
+      <div style="font-size:10px; opacity:.85">${c.team} · ${posLbl}${has ? ` · <b style="color:#ffe08a">보유${dn?` +${dn}`:''}</b>` : ' · 미보유'}</div></div>
     <div class="body2">${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%"></div></div>${v}</div>`).join('')}
     <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.15); color:var(--gold); font-size:10px">COST ${starsHTML(c.cost)}</div></div></div>`;
   }).join('');
-  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>${t} 카드 도감</h3><div class="grid">${items}</div>`);
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
+    <h3>카드 도감 <span style="font-size:12px; color:var(--sub); font-weight:400">${DEX.team} · 보유 ${teamOwned}/${teamTotal}</span></h3>
+    <div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:4px">${['전체',...TEAMS].map(x=>chip('team',x,DEX.team===x)).join('')}</div>
+    <div style="display:flex; gap:4px; flex-wrap:wrap; margin:6px 0 10px">${['전체','타자','투수'].map(x=>chip('type',x,DEX.type===x)).join('')}<span style="width:6px"></span>${['전체','보유','미보유'].map(x=>chip('own',x,DEX.own===x)).join('')}<span style="width:6px"></span>${chip('sort','코스트 높은순 ↓',DEX.sort==='desc')}${chip('sort','코스트 낮은순 ↑',DEX.sort==='asc')}</div>
+    <div style="font-size:11px; color:var(--sub); margin-bottom:8px">${list.length}장 · 회색 카드는 아직 보유하지 않은 카드예요 · 우클릭하면 카드 상세</div>
+    <div class="grid">${items || '<div style="color:var(--sub); font-size:12px">조건에 맞는 카드가 없어요</div>'}</div>`);
+  const mb = document.getElementById('modalBody'); mb.style.maxWidth = '720px';
+  mb.querySelectorAll('[data-dex]').forEach(el=>el.addEventListener('click', ()=>{
+    const [g, v] = el.dataset.dex.split(':');
+    if(g==='sort') DEX.sort = v.includes('높은') ? 'desc' : 'asc'; else DEX[g] = v;
+    showTeamDex();
+  }));
+  attachFlip(mb);
 }
-document.getElementById('goDex').addEventListener('click', ()=>showTeamDex(team));
+document.getElementById('goDex').addEventListener('click', ()=>showTeamDex('전체'));
 
 document.getElementById('goLeaderboard').addEventListener('click', async ()=>{
   if(DB_READY){
