@@ -135,7 +135,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
   <div class="logincard" style="max-width:420px">
     <div class="loginlogo">⚾</div>
     <h1 class="loginTitle">감독할 팀을 선택하세요</h1>
-    <p class="loginSub">선택한 팀에서만 시작 선수를 고르고 초반 영입을 진행해요</p>
+    <p class="loginSub">선택한 팀에서만 시작 선수를 고르고 초반 영입을 진행해요<br><b style="color:var(--navy)">닉네임당 한 팀이며, 고른 뒤에는 바꿀 수 없어요</b></p>
     <div class="orderrow" id="teamPickGrid" style="justify-content:center; flex-wrap:wrap; overflow:visible"></div>
   </div>
 </div>
@@ -248,6 +248,16 @@ const TC = {"삼성": "#074CA1", "KT": "#000000", "LG": "#C30452", "KIA": "#EA00
 const TEAMS = ["삼성", "KT", "LG", "KIA", "두산", "NC", "SSG", "롯데", "한화", "키움"];
 
 let team = localStorage.getItem('sn_team_'+ns()) || '삼성';
+// 닉네임당 팀 하나(한 번 고르면 변경 불가) — 새 팀은 새 닉네임으로
+function teamLock(){ return localStorage.getItem('sn_teamlock_'+ns()) || ''; }
+function setTeamLock(t){ try{ localStorage.setItem('sn_teamlock_'+ns(), t); localStorage.setItem('sn_team_'+ns(), t); }catch(e){} }
+function applyTeamLock(){
+  const l = teamLock();
+  if(l){ team = l; return; }
+  let ob = []; try{ ob = JSON.parse(localStorage.getItem('sn_onboarded_'+ns())||'[]'); }catch(e){}
+  if(ob.length){ setTeamLock(ob.includes(team) ? team : ob[0]); team = teamLock(); } // 기존 닉네임: 현재 팀으로 고정
+}
+applyTeamLock();
 let lineup = loadLineupObjs();
 
 // ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
@@ -262,7 +272,7 @@ function collectSyncPayload(){
     PERSONAL_TEAM_KEYS.forEach(pref=>{ const v = localStorage.getItem(pref+nick+'_'+t); if(v!==null) td[pref]=v; });
     if(Object.keys(td).length) teamsData[t]=td;
   });
-  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, updatedAt: new Date().toISOString() };
+  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, updatedAt: new Date().toISOString() };
 }
 async function pushNow(){
   if(!DB_READY || !UID) return;
@@ -295,6 +305,7 @@ function applySyncPayloadForNick(nick, data){
   if(data.titles) localStorage.setItem('sn_titles_'+nick, data.titles);
   if(data.dupes) localStorage.setItem('sn_dupes_'+nick, data.dupes);
   if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team_'+nick, team); }
+  if(data.teamlock) { localStorage.setItem('sn_teamlock_'+nick, data.teamlock); localStorage.setItem('sn_team_'+nick, data.teamlock); team = data.teamlock; }
 }
 let CLOUD_SYNC_STATUS = '확인 중...';
 async function initCloudSync(){
@@ -358,6 +369,7 @@ async function renderLeagueTeams(){
   }catch(e){ box.textContent = '팀 등록 현황을 불러오지 못했어요.'; }
 }
 async function claimTeam(code, name){
+  if(teamLock() && teamLock()!==name){ alert(`이 닉네임은 ${teamLock()} 감독이에요. 팀은 바꿀 수 없어요.\n다른 팀으로 하려면 로그아웃 후 새 닉네임으로 시작해주세요.`); return; }
   try{
     const ref = DB.doc('teams/'+code);
     const lease = await ref.acquire({holder: UID, ttlMs: 5000});
@@ -365,7 +377,7 @@ async function claimTeam(code, name){
     const snap = await ref.get();
     if(snap.exists && snap.data().ownerId && snap.data().ownerId!==UID){ alert('방금 다른 사람이 먼저 등록했어요.'); renderLeagueTeams(); return; }
     await ref.set({ownerId: UID, nickname: getNickname()||'익명'});
-    team = name; localStorage.setItem('sn_team_'+ns(), team);
+    team = name; setTeamLock(team);
     lineup = loadLineupObjs(); pitcherLineup = loadPitcherLineup(); selPitcherSlot=null;
     const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
     refreshCurrencyDisplay(); renderHome(); schedulePush();
@@ -413,7 +425,8 @@ function renderTeamPickGrid(){
   grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled" data-team="${t}"><div class="av" style="background:linear-gradient(135deg,${TC[t]},#0a1530)">${t[0]}</div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
   grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{
     const t = el.dataset.team;
-    team = t; localStorage.setItem('sn_team_'+ns(), team);
+    if(!confirm(`${t}로 시작할까요?\n이 닉네임으로는 팀을 다시 바꿀 수 없어요. (다른 팀은 새 닉네임으로)`)) return;
+    team = t; setTeamLock(team);
     const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
     hideTeamPickPage();
     triggerOnboarding(team);
@@ -438,6 +451,10 @@ document.getElementById('nicknameStartBtn').addEventListener('click', ()=>{
   if(!v){ alert('닉네임을 입력해주세요.'); return; }
   setNickname(v);
   hideNicknameGate();
+  // 닉네임별 팀으로 전환 (고정된 팀이 있으면 그 팀)
+  team = localStorage.getItem('sn_team_'+ns()) || '삼성'; applyTeamLock();
+  lineup = loadLineupObjs(); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
+  try{ refreshCurrencyDisplay(); renderHome(); }catch(e){}
   if(!showTeamPickIfNeeded()) triggerOnboarding(team);
 });
 document.getElementById('nicknameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('nicknameStartBtn').click(); });
@@ -458,29 +475,23 @@ function pickDistinct(pool, count){
   const shuffled = [...pool].sort(()=>Math.random()-0.5);
   return shuffled.slice(0, count);
 }
+const ONBOARD_MAX_COST = 6; // 입단 30연차는 코스트 6 이하 카드만
 function guaranteedGlobalPulls(n){
-  // 투수진(선발5·중계4·셋업1·마무리1=11명)을 정확한 매수로 확정 보장 -> 뽑은 즉시 라인업 완성 가능
+  const low = CARDS.filter(c=>c.cost<=ONBOARD_MAX_COST);
+  // 투수진(선발5·중계4·셋업1·마무리1=11명) 확정 보장 → 바로 투수진 완성 가능
   const guaranteedPitchers = [
-    ...pickDistinct(CARDS.filter(c=>c.pos==='선발'), 5),
-    ...pickDistinct(CARDS.filter(c=>c.pos==='중계'), 4),
-    ...pickDistinct(CARDS.filter(c=>c.pos==='셋업'), 1),
-    ...pickDistinct(CARDS.filter(c=>c.pos==='마무리'), 1),
+    ...pickDistinct(low.filter(c=>c.pos==='선발'), 5),
+    ...pickDistinct(low.filter(c=>c.pos==='중계'), 4),
+    ...pickDistinct(low.filter(c=>c.pos==='셋업'), 1),
+    ...pickDistinct(low.filter(c=>c.pos==='마무리'), 1),
   ];
-  // 타자 8포지션 전부 커버 + 여분 1명 = 9명, 타순 9자리를 바로 채울 수 있게 보장
+  // 타자 8포지션 전부 + 여분 1명 = 9명 → 타순 9자리 바로 완성
   const fieldGroups = ['포수','1루수','2루수','3루수','유격수','좌익수','중견수','우익수'];
-  const guaranteedBatters = fieldGroups.map(p=>{ const pool = CARDS.filter(c=>c.fieldpos===p); return pool[Math.floor(Math.random()*pool.length)]; });
+  const guaranteedBatters = fieldGroups.map(p=>{ const pool = low.filter(c=>c.fieldpos===p); return pool[Math.floor(Math.random()*pool.length)]; });
   const usedKeys = new Set([...guaranteedPitchers, ...guaranteedBatters].map(pkey));
-  const extraBatterPool = CARDS.filter(c=>c.pos==='타자' && !usedKeys.has(pkey(c)));
-  const extraBatter = extraBatterPool[Math.floor(Math.random()*extraBatterPool.length)];
-  usedKeys.add(pkey(extraBatter));
-  // 남은 자리는 코스트7+ 확정 1장 + 나머지는 일반 가챠 확률로 채움
-  const highPool = CARDS.filter(c=>c.cost>=7 && !usedKeys.has(pkey(c)));
-  const pity = highPool[Math.floor(Math.random()*highPool.length)];
-  const guaranteedCount = guaranteedPitchers.length + guaranteedBatters.length + 1 /*extraBatter*/ + 1 /*pity*/;
-  const fillerCount = Math.max(0, n - guaranteedCount);
-  const filler = Array.from({length: fillerCount}, ()=>pullCardOnce());
-  const picked = [...guaranteedBatters, extraBatter, ...guaranteedPitchers, pity, ...filler];
-  return picked.slice(0, n);
+  // 나머지는 코스트 6 이하에서 겹치지 않게 무작위
+  const rest = pickDistinct(low.filter(c=>!usedKeys.has(pkey(c))), Math.max(0, n - usedKeys.size));
+  return [...guaranteedBatters, ...guaranteedPitchers, ...rest].slice(0, n);
 }
 function finishOnboarding(t, pickedB, pickedP){
   if(pickedB) addOwned(pickedB);
@@ -1249,7 +1260,7 @@ function renderCostBar(){
   const tcInfo = teamColorInfo();
   const tcText = tcInfo.notCustom ? '팀컬러: 타순 9명·투수진 11명을 직접 모두 채워야 적용돼요(벤치 포함 집계)' : !tcInfo.count ? '팀컬러: 로스터가 비어 있어요' :
     `팀컬러: ${tcInfo.team} ${tcInfo.year} ${tcInfo.count}명 (경기 로스터+벤치)` +
-    (tcInfo.grade ? ` · ${tcInfo.grade}등급 → 이 팀 선수 야수 +${tcInfo.bat} / 투수 +${tcInfo.pit}` : ' · 5명부터 C등급') +
+    (tcInfo.grade ? ` · ${tcInfo.grade}등급 → 이 팀 선수 야수 +${tcInfo.bat} / 투수 +${tcInfo.pit}` : ' · 10명부터 C등급') +
     (tcInfo.next ? ` · ${tcInfo.next[0]}등급까지 ${tcInfo.next[1]-tcInfo.count}명` : '');
   const legendCount = (lineup||[]).concat(['starters','middle','setup','closer'].flatMap(k=>pl[k]||[])).filter(c=>c&&c.rarity==='레전드').length;
   document.getElementById('costBar').innerHTML = `
@@ -1260,7 +1271,9 @@ function renderCostBar(){
     <div class="item">팀컬러<b style="color:${tcInfo.grade?'var(--gold)':'var(--sub)'}">${tcInfo.grade||'-'}</b></div>
     <div style="flex-basis:100%; font-size:11px; color:var(--sub)">${tcText}</div>`;
 }
-function loadBench(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_bench_'+ns()+'_'+team)||'[]')); }catch(e){ return new Set(); } }
+const BENCH_MAX = 5; // 벤치는 타순처럼 최대 5자리
+function loadBench(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_bench_'+ns()+'_'+team)||'[]').slice(0, BENCH_MAX)); }catch(e){ return new Set(); } }
+function benchAdd(k){ const b = loadBench(); if(b.has(k)) return true; if(b.size>=BENCH_MAX){ alert(`벤치는 최대 ${BENCH_MAX}명까지예요. 벤치 선수를 먼저 빼주세요.`); return false; } b.add(k); saveBench(b); return true; }
 function saveBench(s){ try{ localStorage.setItem('sn_bench_'+ns()+'_'+team, JSON.stringify([...s])); }catch(e){} schedulePush(); }
 let waitPosFilter = '전체';
 let pitcherPosFilter = '전체';
@@ -1346,21 +1359,23 @@ function renderLineup(){
   const poolAll = CARDS.filter(c=>c.pos==='타자' && owned.has(pkey(c)));
   const usedInLineup = new Set(lineup.filter(Boolean).map(pkey));
   const bench = loadBench();
-  const benchCards = applySort(poolAll.filter(c=>bench.has(pkey(c)) && !usedInLineup.has(pkey(c))), waitSort);
+  const benchCards = [...bench].map(k=>poolAll.find(c=>pkey(c)===k)).filter(c=>c && !usedInLineup.has(pkey(c))); // 넣은 순서대로
   let waitCards = poolAll.filter(c=>!bench.has(pkey(c)) && !usedInLineup.has(pkey(c)));
   if(waitPosFilter!=='전체') waitCards = waitCards.filter(c=>(c.fieldpos||'')===waitPosFilter);
 
-  document.getElementById('benchTitle').textContent = `벤치 (경기 로스터 · 클릭해서 뺄 수 있어요) — ${benchCards.length}명`;
+  document.getElementById('benchTitle').textContent = `벤치 (경기 로스터 · 클릭해서 뺄 수 있어요) — ${benchCards.length}/${BENCH_MAX}`;
   const benchDiv = document.getElementById('benchPool');
-  benchDiv.innerHTML = benchCards.map(c=>batterMiniCard(c, `data-n="${pkey(c)}" draggable="true"`)).join('');
+  benchDiv.innerHTML = Array.from({length:BENCH_MAX}, (_,i)=>{ const c = benchCards[i];
+    return `<div style="display:flex; flex-direction:column; gap:3px; flex-shrink:0; width:78px"><div style="font-size:10px; font-weight:800; color:var(--sub); text-align:center">벤치 ${i+1}</div>${batterMiniCard(c||null, c?`data-n="${pkey(c)}" draggable="true"`:'')}</div>`; }).join('');
   benchDiv.addEventListener('dragover', e=>{ e.preventDefault(); benchDiv.classList.add('dragover'); });
   benchDiv.addEventListener('dragleave', ()=>benchDiv.classList.remove('dragover'));
   benchDiv.addEventListener('drop', e=>{
     e.preventDefault(); benchDiv.classList.remove('dragover');
     const k = e.dataTransfer.getData('text/plain'); if(!k) return;
     const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
+    if(!loadBench().has(pkey(c)) && loadBench().size>=BENCH_MAX){ alert(`벤치는 최대 ${BENCH_MAX}명까지예요. 벤치 선수를 먼저 빼주세요.`); return; }
     const dupIdx = lineup.findIndex(x=>x && pkey(x)===k); if(dupIdx>-1){ lineup[dupIdx]=null; saveLineup(); }
-    const b = loadBench(); b.add(pkey(c)); saveBench(b); renderLineup(); renderHome();
+    benchAdd(pkey(c)); renderLineup(); renderHome();
   });
   benchDiv.querySelectorAll('.minicard.filled').forEach(el=>{
     el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
@@ -1382,7 +1397,7 @@ function renderLineup(){
   poolDiv.querySelectorAll('.minicard.filled').forEach(el=>{
     el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
     el.addEventListener('click', ()=>{
-      const b = loadBench(); b.add(el.dataset.n); saveBench(b); renderLineup();
+      if(benchAdd(el.dataset.n)) renderLineup();
     });
   });
   attachFlip(benchDiv); attachFlip(poolDiv);
@@ -1679,7 +1694,7 @@ function boostedCard(c){
 const _lineupForBase = lineupFor, _staffForBase = staffFor;
 // ===== 팀컬러 (단일연도, 현재 유저 팀에만 적용) =====
 // 경기 로스터(타자9+투수11)+벤치에서 같은 팀·같은 연도 선수 수로 등급 결정, 그 팀 선수에게만 보너스
-const TEAM_COLOR_TIERS = [['S',20,17,12],['A',15,12,9],['B',10,8,6],['C',5,4,3]]; // [등급, 최소인원, 야수+, 투수+]
+const TEAM_COLOR_TIERS = [['S',25,17,12],['A',20,12,9],['B',15,8,6],['C',10,4,3]]; // [등급, 최소인원, 야수+, 투수+]
 function cardYear(c){ return c.year || 2025; }
 function teamColorInfo(){
   // 직접 구성한 라인업(타자 9 + 투수 11을 모두 채움)일 때만 적용. 기본 1군 편성으로 진행되는 경기에는 없음
