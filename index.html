@@ -158,7 +158,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div id="leagueTeamsBox" class="result-line">계정 연결을 확인하는 중...</div>
 
 <div style="display:flex; justify-content:flex-end; margin-top:26px">
-<button class="btn ghost" id="logoutBtn" style="font-size:12px; padding:8px 16px">로그아웃</button>
+<button class="btn ghost" id="resetNickBtn" style="font-size:12px; padding:8px 16px; margin-right:6px; color:#e0312b; border-color:#e0312b">이 닉네임 처음부터</button><button class="btn ghost" id="logoutBtn" style="font-size:12px; padding:8px 16px">로그아웃</button>
 </div>
 </div>
 
@@ -440,6 +440,23 @@ function showTeamPickIfNeeded(){
   }
   return false;
 }
+// 닉네임 초기화: 이 닉네임의 모든 진행(팀 고정·보유카드·화폐·라인업·훈련·우승기록)을 지우고 팀 선택부터 다시
+document.getElementById('resetNickBtn').addEventListener('click', async ()=>{
+  const nick = ns();
+  if(!confirm(`'${nick}' 닉네임의 모든 진행 상황을 지우고 처음부터 다시 시작할까요?\n팀·보유 카드·화폐·라인업·훈련·우승 기록이 모두 삭제되고 되돌릴 수 없어요.`)) return;
+  const typed = prompt(`확인을 위해 닉네임 '${nick}'을(를) 그대로 입력해주세요.`);
+  if(typed===null || typed.trim()!==nick){ alert('닉네임이 일치하지 않아 취소했어요.'); return; }
+  try{ // 리그 팀 등록 해제
+    if(DB_READY){ const code = TEAM_CODE[team]; if(code){ const ref = DB.doc('teams/'+code); const snap = await ref.get(); if(snap.exists && snap.data().ownerId===UID) await ref.delete(); } }
+  }catch(e){}
+  const del = [];
+  for(let i=0;i<localStorage.length;i++){ const k = localStorage.key(i); if(k && k.startsWith('sn_') && k!=='sn_nickname' && (k.endsWith('_'+nick) || k.includes('_'+nick+'_'))) del.push(k); }
+  del.forEach(k=>localStorage.removeItem(k));
+  if(DB_READY){ try{ await pushNow(); }catch(e){} } // 클라우드 세이브도 빈 상태로 덮어쓰기
+  team = '삼성'; lineup = new Array(9).fill(null); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
+  alert('초기화했어요. 팀 선택부터 다시 시작해요.');
+  location.reload();
+});
 document.getElementById('logoutBtn').addEventListener('click', ()=>{
   localStorage.removeItem('sn_nickname');
   const input = document.getElementById('nicknameInput'); if(input) input.value='';
@@ -498,6 +515,15 @@ function finishOnboarding(t, pickedB, pickedP){
   if(pickedP) addOwned(pickedP);
   const pulled = guaranteedGlobalPulls(30);
   pulled.forEach(c=>addOwned(c));
+  // 안전장치: 보유 카드 기준으로 타자 8포지션·투수 4보직이 빠졌으면 코스트 6 이하에서 보충
+  const own = loadOwned(), mine = CARDS.filter(c=>own.has(pkey(c)));
+  ['포수','1루수','2루수','3루수','유격수','좌익수','중견수','우익수'].forEach(p=>{
+    if(!mine.some(c=>c.pos==='타자' && c.fieldpos===p)){ const pool = CARDS.filter(c=>c.fieldpos===p && c.cost<=ONBOARD_MAX_COST && !own.has(pkey(c))); const c = pool[Math.floor(Math.random()*pool.length)]; if(c){ addOwned(c); pulled.push(c); } }
+  });
+  [['선발',5],['중계',4],['셋업',1],['마무리',1]].forEach(([r,n])=>{
+    const have = mine.filter(c=>c.pos===r).length;
+    if(have < n){ const pool = CARDS.filter(c=>c.pos===r && c.cost<=ONBOARD_MAX_COST && !loadOwned().has(pkey(c))); pickDistinct(pool, n-have).forEach(c=>{ addOwned(c); pulled.push(c); }); }
+  });
   const done = loadOnboarded(); done.add(t); saveOnboarded(done);
   let idx = 0;
   function showReveal(){
