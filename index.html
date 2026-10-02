@@ -179,7 +179,8 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div class="costbar" id="costBar"></div>
 <h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 드래그로 배치 · 우클릭하면 카드가 커져요)</h2>
 <div class="slots orderrow" id="slots"></div>
-<button class="btn ghost" id="resetBtn" style="margin-top:10px">초기화</button>
+<button class="btn ghost" id="resetBtn" style="margin-top:10px">초기화</button> <button class="btn ghost" id="autoPosBtn" style="margin-top:10px">포지션 자동 배치</button>
+<div style="font-size:11px; color:var(--sub); margin-top:6px">타순마다 수비 포지션을 고를 수 있어요. 2025 수비 기록이 없는 포지션은 전 능력치 -10%(포수 자리는 -20%), 30이닝 미만은 -5%, 지명타자는 패널티 없음.</div>
 <h2 class="sec" id="benchTitle">벤치 (경기 로스터 · 클릭해서 뺄 수 있어요)</h2>
 <div class="pool orderrow" id="benchPool"></div>
 <h2 class="sec" id="poolTitle">대기 명단 (보유 카드 전체 · 클릭하면 벤치로)</h2>
@@ -251,7 +252,7 @@ let lineup = loadLineupObjs();
 
 // ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
 let DB = null, UID = null, DB_READY = false, pushTimer = null, pushInFlight = false, pushQueued = false;
-const PERSONAL_TEAM_KEYS = ['sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
+const PERSONAL_TEAM_KEYS = ['sn_lineuppos_','sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
 function ns(){ return getNickname() || 'guest'; }
 function collectSyncPayload(){
   const nick = ns();
@@ -1267,12 +1268,66 @@ let waitSort = null; // null | 'desc' | 'asc'
 let pitcherSort = null;
 function nextSort(s){ return s===null ? 'desc' : (s==='desc' ? 'asc' : null); }
 function sortLabel(s){ return s===null ? '코스트순' : (s==='desc' ? '코스트↓' : '코스트↑'); }
+function sortButtonsHTML(cur, prefix){ // 코스트 높은순/낮은순 (다시 누르면 해제)
+  const st = on => `padding:5px 10px; font-size:11px; white-space:nowrap; margin-left:4px; ${on?'background:var(--gold); color:#fff; border-color:var(--gold)':''}`;
+  return `<button class="btn ghost" data-sort="${prefix}:desc" style="${st(cur==='desc')}">코스트 높은순 ↓</button><button class="btn ghost" data-sort="${prefix}:asc" style="${st(cur==='asc')}">코스트 낮은순 ↑</button>`;
+}
 function applySort(arr, s){ if(!s) return arr; const a=[...arr]; a.sort((x,y)=> s==='desc' ? y.cost-x.cost : x.cost-y.cost); return a; }
+// ===== 타순별 수비 포지션 지정 + 포지션 적합도 패널티 =====
+const LINEUP_POSITIONS = ['포수','1루수','2루수','3루수','유격수','좌익수','중견수','우익수','지명타자'];
+const POS_ABBR = {'포수':'C','1루수':'1B','2루수':'2B','3루수':'3B','유격수':'SS','좌익수':'LF','중견수':'CF','우익수':'RF','지명타자':'DH'};
+// 패널티: 출전 기록 없는 포지션 전 능력치 -10%(포수 자리는 -20%) · 30이닝 미만 -5% · 지명타자·기록 있는 포지션은 없음
+const POS_PENALTY = {none:0.10, catcherNone:0.20, small:0.05};
+function autoLineupPos(lu){
+  const free = new Set(LINEUP_POSITIONS), res = new Array(9).fill(null);
+  lu.forEach((c,i)=>{ if(c && free.has(c.fieldpos)){ res[i]=c.fieldpos; free.delete(c.fieldpos); } }); // 1) 주포지션
+  lu.forEach((c,i)=>{ if(res[i] || !c) return; // 2) 뛰어본 포지션 중 수비 값이 가장 높은 곳
+    const o = Object.entries(c.fd||{}).filter(([p,d])=>free.has(p) && d[1]>=DEF_MIN_IP).sort((a,b)=>b[1][0]-a[1][0]);
+    if(o.length){ res[i]=o[0][0]; free.delete(o[0][0]); } });
+  lu.forEach((c,i)=>{ if(!res[i] && c && free.has('지명타자')){ res[i]='지명타자'; free.delete('지명타자'); } }); // 3) 지명타자
+  res.forEach((p,i)=>{ if(!p){ const f=[...free][0]; res[i]=f; free.delete(f); } }); // 4) 남은 자리
+  return res;
+}
+function loadLineupPos(){
+  try{ const a = JSON.parse(localStorage.getItem('sn_lineuppos_'+ns()+'_'+team)||'null'); if(Array.isArray(a) && a.length===9 && new Set(a).size===9 && a.every(p=>LINEUP_POSITIONS.includes(p))) return a; }catch(e){}
+  return autoLineupPos(lineup || loadLineupObjs() || []);
+}
+function saveLineupPos(a){ try{ localStorage.setItem('sn_lineuppos_'+ns()+'_'+team, JSON.stringify(a)); }catch(e){} schedulePush(); }
+function positionFit(c, pos){
+  if(!c) return {pen:0, label:''};
+  if(pos==='지명타자') return {pen:0, label:'지명타자'};
+  const d = (baseCardOf(c).fd||{})[pos];
+  if(!d) return {pen: pos==='포수'?POS_PENALTY.catcherNone:POS_PENALTY.none, label:'기록 없음'};
+  if(d[1] < DEF_MIN_IP) return {pen:POS_PENALTY.small, label:'경험 부족', def:d[0]};
+  return {pen:0, label: pos===c.fieldpos?'주포지션':'가능', def: pos===c.fieldpos ? null : d[0]};
+}
+function applyPositionFit(c, pos){
+  if(!c) return c;
+  const f = positionFit(c, pos); let stats = c.stats;
+  if(f.def!=null){ const baseDef = (baseCardOf(c).stats.find(s=>s[0]==='수비력')||[0,0])[1]; stats = stats.map(([l,v])=> l==='수비력' ? [l, v-baseDef+f.def] : [l,v]); } // 그 포지션 수비 값으로
+  if(f.pen) stats = stats.map(([l,v])=>[l, Math.max(1, Math.round(v*(1-f.pen)))]);
+  return {...c, stats, gamePos:pos};
+}
 function renderLineup(){
   document.documentElement.style.setProperty('--tc', TC[team]);
   if(!lineup || lineup.length!==9) lineup = new Array(9).fill(null);
   const slotsDiv = document.getElementById('slots');
-  slotsDiv.innerHTML = lineup.map((c,i)=>batterMiniCard(c, `data-i="${i}" ${c?'draggable="true"':''}`)).join('');
+  const lpos = loadLineupPos();
+  slotsDiv.innerHTML = lineup.map((c,i)=>{
+    const f = positionFit(c, lpos[i]);
+    const col = !c ? 'var(--sub)' : f.pen ? '#e0312b' : 'var(--sub)';
+    return `<div style="display:flex; flex-direction:column; gap:3px; flex-shrink:0; width:78px">
+      <div style="font-size:10px; font-weight:800; color:var(--navy); text-align:center">${i+1}번</div>
+      ${batterMiniCard(c, `data-i="${i}" ${c?'draggable="true"':''}`)}
+      <select data-pi="${i}" style="font-size:11px; padding:3px 2px; border-radius:6px; border:1.5px solid ${f.pen?'#e0312b':'#d8e0ee'}; font-weight:700">${LINEUP_POSITIONS.map(p=>`<option value="${p}" ${p===lpos[i]?'selected':''}>${POS_ABBR[p]} ${p}</option>`).join('')}</select>
+      <div style="font-size:9.5px; text-align:center; color:${col}; min-height:12px">${c ? (f.pen ? `${f.label} -${Math.round(f.pen*100)}%` : f.label) : ''}</div>
+    </div>`;
+  }).join('');
+  slotsDiv.querySelectorAll('select[data-pi]').forEach(sel=>sel.addEventListener('change', ()=>{
+    const i = +sel.dataset.pi, a = loadLineupPos(), j = a.indexOf(sel.value);
+    if(j>-1 && j!==i){ a[j] = a[i]; } a[i] = sel.value; // 이미 쓰는 포지션이면 서로 맞바꿈
+    saveLineupPos(a); renderLineup();
+  }));
   slotsDiv.querySelectorAll('.minicard').forEach(el=>{
     el.addEventListener('click', ()=>{ if(el.classList.contains('filled')){ lineup[+el.dataset.i]=null; saveLineup(); renderLineup(); } });
     el.addEventListener('dragstart', e=>{ const c = lineup[+el.dataset.i]; if(c) e.dataTransfer.setData('text/plain', pkey(c)); });
@@ -1291,7 +1346,7 @@ function renderLineup(){
   const poolAll = CARDS.filter(c=>c.pos==='타자' && owned.has(pkey(c)));
   const usedInLineup = new Set(lineup.filter(Boolean).map(pkey));
   const bench = loadBench();
-  const benchCards = poolAll.filter(c=>bench.has(pkey(c)) && !usedInLineup.has(pkey(c)));
+  const benchCards = applySort(poolAll.filter(c=>bench.has(pkey(c)) && !usedInLineup.has(pkey(c))), waitSort);
   let waitCards = poolAll.filter(c=>!bench.has(pkey(c)) && !usedInLineup.has(pkey(c)));
   if(waitPosFilter!=='전체') waitCards = waitCards.filter(c=>(c.fieldpos||'')===waitPosFilter);
 
@@ -1316,9 +1371,9 @@ function renderLineup(){
 
   const filterBar = document.getElementById('posFilterBar');
   filterBar.innerHTML = ['전체', ...FIELD_POSITIONS].map(p=>`<button class="btn ghost" data-fp="${p}" style="padding:5px 10px; font-size:11px; white-space:nowrap; ${p===waitPosFilter?'background:var(--navy); color:#fff':''}">${p}</button>`).join('')
-    + `<button class="btn ghost" id="waitSortBtn" style="padding:5px 10px; font-size:11px; white-space:nowrap; margin-left:4px">${sortLabel(waitSort)}</button>`;
+    + sortButtonsHTML(waitSort, 'wait');
   filterBar.querySelectorAll('[data-fp]').forEach(el=>el.addEventListener('click', ()=>{ waitPosFilter = el.dataset.fp; renderLineup(); }));
-  document.getElementById('waitSortBtn').addEventListener('click', ()=>{ waitSort = nextSort(waitSort); renderLineup(); });
+  filterBar.querySelectorAll('[data-sort]').forEach(el=>el.addEventListener('click', ()=>{ const v = el.dataset.sort.split(':')[1]; waitSort = waitSort===v ? null : v; renderLineup(); }));
   waitCards = applySort(waitCards, waitSort);
 
   document.getElementById('poolTitle').textContent = `대기 명단 (보유 카드 전체 · 클릭하면 벤치로) — ${waitCards.length}명 · 타순 ${lineup.filter(Boolean).length}/9`;
@@ -1334,6 +1389,7 @@ function renderLineup(){
   renderCostBar();
 }
 document.getElementById('resetBtn').addEventListener('click', ()=>{ lineup=new Array(9).fill(null); saveLineup(); renderLineup(); renderHome(); });
+document.getElementById('autoPosBtn').addEventListener('click', ()=>{ saveLineupPos(autoLineupPos(lineup||[])); renderLineup(); });
 
 // ===== pitcher lineup =====
 const ROLE_LABELS = {starters:'선발(5)', middle:'중계 - 필승/박빙/추격/패전(4)', setup:'셋업(1)', closer:'마무리(1)'};
@@ -1428,9 +1484,9 @@ function renderPitchers(){
   if(pitcherPosFilter!=='전체') remain = remain.filter(c=>c.pos===pitcherPosFilter);
   const pFilterBar = document.getElementById('pitcherPosFilterBar');
   pFilterBar.innerHTML = ['전체','선발','중계','셋업','마무리'].map(p=>`<button class="btn ghost" data-pp="${p}" style="padding:5px 10px; font-size:11px; white-space:nowrap; ${p===pitcherPosFilter?'background:var(--navy); color:#fff':''}">${p}</button>`).join('')
-    + `<button class="btn ghost" id="pitcherSortBtn" style="padding:5px 10px; font-size:11px; white-space:nowrap; margin-left:4px">${sortLabel(pitcherSort)}</button>`;
+    + sortButtonsHTML(pitcherSort, 'pitcher');
   pFilterBar.querySelectorAll('[data-pp]').forEach(el=>el.addEventListener('click', ()=>{ pitcherPosFilter = el.dataset.pp; renderPitchers(); }));
-  document.getElementById('pitcherSortBtn').addEventListener('click', ()=>{ pitcherSort = nextSort(pitcherSort); renderPitchers(); });
+  pFilterBar.querySelectorAll('[data-sort]').forEach(el=>el.addEventListener('click', ()=>{ const v = el.dataset.sort.split(':')[1]; pitcherSort = pitcherSort===v ? null : v; renderPitchers(); }));
   remain = applySort(remain, pitcherSort);
   document.getElementById('pitcherPoolTitle').textContent = `투수 대기 명단 (${remain.length}명) — 카드를 슬롯으로 끌어다 놓으세요(모바일은 슬롯 선택 후 탭)`;
   const poolDiv = document.getElementById('pitcherPool');
@@ -1651,7 +1707,9 @@ lineupFor = function(t){
   const base = _lineupForBase(t);
   if(t!==team) return base;
   const owned = loadOwned(), tc = teamColorInfo();
-  return base.map(c=>applyTeamColor(owned.has(pkey(c)) ? boostedCard(c) : c, tc));
+  const custom = (loadLineupObjs()||[]).filter(Boolean).length===9; // 직접 짠 타순일 때만 포지션 적용
+  const pos = custom ? loadLineupPos() : null;
+  return base.map((c,i)=>{ const x = applyTeamColor(owned.has(pkey(c)) ? boostedCard(c) : c, tc); return pos ? applyPositionFit(x, pos[i]) : x; });
 };
 function penalizeIfMisplacedStarter(c, cat){
   if(!c || cat==='starters' || c.pos!=='선발') return c;
