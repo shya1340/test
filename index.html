@@ -104,6 +104,8 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .navbar{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #eef1f6; display:flex; padding-bottom:env(safe-area-inset-bottom,0px);}
 .navbtn{flex:1; text-align:center; padding:11px 0 9px; font-size:11.5px; color:var(--sub); font-weight:700; cursor:pointer;}
 .navbtn.active{color:var(--tc);}
+.navbtn{position:relative;}
+.navbtn[data-badge]::after{content:attr(data-badge); position:absolute; top:3px; left:56%; background:#e0312b; color:#fff; font-size:9px; font-weight:800; border-radius:8px; padding:1px 5px; line-height:1.3;}
 .note{margin-top:18px; padding:12px 14px; background:var(--lightblue); border-radius:10px; font-size:11.5px; color:var(--sub); line-height:1.6;}
 .overlay{position:fixed; inset:0; background:rgba(10,20,40,.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:50;}
 .loginpage{position:fixed; inset:0; z-index:200; display:none; align-items:center; justify-content:center; padding:24px; background:linear-gradient(160deg,var(--navy),#050d22);}
@@ -194,6 +196,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 
 <div class="view" id="view-lineup">
 <div class="costbar" id="costBar"></div>
+<div id="luTools" style="display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 8px"><button class="btn ghost" id="recBtn">⚡ 추천 라인업</button><button class="btn ghost" id="presetBtn">💾 프리셋</button><button class="btn ghost" id="cmpBtn">⚖ 카드 비교</button></div>
 <div class="filtertabs" id="luTabs"></div>
 <div id="lu-tac" style="display:none">
 <div id="tacticsBox" style="border:1px solid #eef1f6; border-radius:10px; padding:10px 12px; margin-bottom:6px"></div>
@@ -332,7 +335,7 @@ let lineup = loadLineupObjs();
 
 // ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
 let DB = null, UID = null, DB_READY = false, pushTimer = null, pushInFlight = false, pushQueued = false;
-const PERSONAL_TEAM_KEYS = ['sn_tactics_','sn_locks_','sn_lineuppos_','sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
+const PERSONAL_TEAM_KEYS = ['sn_presets_','sn_tactics_','sn_locks_','sn_lineuppos_','sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
 function ns(){ return getNickname() || 'guest'; }
 function collectSyncPayload(){
   const nick = ns();
@@ -731,7 +734,7 @@ function finishOnboarding(t, pickedB, pickedP){
       <div style="font-size:12px; color:var(--sub); margin-bottom:8px">뽑기권 30장을 모두 사용해 초반 로스터를 채웠어요</div>
       <div class="grid">${chunk.map(c=>{
         const isB = c.pos==='타자';
-        return `<div class="card" style="background:${TC[c.team]}; border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}">${c.rarity}</div><div class="name">${c.name}</div></div><div class="body2" style="font-size:10px">${isB?(c.fieldpos||'타자'):c.pos}</div></div>`;
+        return `<div class="card" style="background:${TC[c.team]}; border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}">${c.rarity}</div><div class="name">${c.name}</div></div><div class="body2" style="font-size:11px; font-weight:800">${isB?(c.fieldpos||'타자'):c.pos} · ${c.team} · ★${c.cost}</div></div>`;
       }).join('')}</div>
       <button class="btn" style="margin-top:14px; width:100%" id="onboardNext">${idx+6<30?'다음':'게임 시작하기'}</button>
     `;
@@ -750,13 +753,14 @@ function triggerOnboarding(t){
   const done = loadOnboarded();
   if(done.has(t)) return;
   const pool = CARDS.filter(c=>c.team===t && c.cost<=6);
-  const batters = pool.filter(c=>c.pos==='타자');
-  const pitchers = pool.filter(c=>c.pos!=='타자');
+  const PO = ['포수','1루수','2루수','3루수','유격수','좌익수','중견수','우익수','지명타자'], RO = ['선발','중계','셋업','마무리'];
+  const batters = pool.filter(c=>c.pos==='타자').sort((a,b)=>PO.indexOf(a.fieldpos)-PO.indexOf(b.fieldpos) || b.cost-a.cost);
+  const pitchers = pool.filter(c=>c.pos!=='타자').sort((a,b)=>RO.indexOf(a.pos)-RO.indexOf(b.pos) || b.cost-a.cost);
   let selB = null, selP = null;
   function miniPick(c, sel){
     const isSel = sel && sel.name===c.name;
     return `<div class="minicard ${isSel?'filled':''}" data-pk="${pkey(c)}" style="${isSel?'outline:2px solid var(--gold)':''}"><div class="av" style="background:linear-gradient(135deg,${TC[c.team]},#0a1530)">${c.name[0]}</div>
-      <div class="info"><div class="nm">${c.name}</div><div class="ps">COST ${c.cost}</div></div></div>`;
+      <div class="info"><div class="nm">${c.name}</div><div class="ps" style="font-weight:800; color:var(--navy)">${c.pos==='타자'?c.fieldpos:c.pos}</div><div class="cst">★${c.cost}</div></div></div>`;
   }
   function draw(){
     document.getElementById('modalBody').innerHTML = `
@@ -1224,6 +1228,8 @@ function simSeasonGame(g, ctx){
       plays: r.plays.slice(0,15), side: mySide,
       bat: Object.values(mySide==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
       pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so})) } };
+    out.box.pk = SIM_CTX.dayKey+'|'+(ctx.slot||0)+'|'+g.away+'@'+g.home;
+    pbpSave(out.box.pk, log);
   }
   return out;
 }
@@ -1466,11 +1472,13 @@ function showBoxScore(g, r, title){
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
     <h3 style="margin-bottom:2px">${title||''}</h3><div style="font-size:12px; color:var(--sub)">${g.away} ${r.scoreAway} : ${r.scoreHome} ${g.home}${tags?' · '+tags:''}</div>
     ${grid}
+    ${b.pk && pbpGet(b.pk) ? `<button class="btn ghost" id="pbpBtn" style="margin-top:8px">📻 경기 중계 다시보기</button>` : `<div style="font-size:11px; color:var(--sub); margin-top:6px">경기 중계는 이 기기에서 계산된 최근 ${PBP_MAX}경기만 다시 볼 수 있어요</div>`}
     <h2 class="sec">득점 장면</h2>${(b.plays||[]).length ? b.plays.map(p=>`<div style="font-size:12px; padding:3px 0; border-bottom:1px solid #f5f7fa">${p}</div>`).join('') : '<div class="result-line">득점이 없었어요</div>'}
     <h2 class="sec">${team} 타자</h2><div style="overflow-x:auto"><table class="standtbl" style="white-space:nowrap"><tr><th>선수</th><th>포지션</th><th>타수</th><th>안타</th><th>홈런</th><th>타점</th><th>볼넷</th><th>도루</th></tr>${bat}</table></div>
     <h2 class="sec">투수 기록</h2><div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
       <div><div style="font-size:11px; font-weight:800">${g.away}</div><table class="standtbl"><tr><th>투수</th><th>이닝</th><th>실점</th><th>K</th></tr>${pit('a')}</table></div>
       <div><div style="font-size:11px; font-weight:800">${g.home}</div><table class="standtbl"><tr><th>투수</th><th>이닝</th><th>실점</th><th>K</th></tr>${pit('h')}</table></div></div>`);
+  const pb = document.getElementById('pbpBtn'); if(pb) pb.onclick = ()=>showPBP(b.pk, `${title||''} 중계`);
 }
 // ===== 시즌 시상 / 기록실 =====
 let CARD_BY_KEY = null;
@@ -1616,7 +1624,7 @@ function buildSummary(){
   SUMMARY_HTML = `<div class="card-mini" style="background:linear-gradient(135deg,var(--tc),#0a1530)"><div class="r1"><h3 style="font-size:15px">지난 접속 이후 ${games.length}경기</h3><b>${w}승${d?` ${d}무`:''} ${l}패</b></div>
     <div class="sub2">득점 ${rs} · 실점 ${ra}${topB?` · 타선 MVP ${topB.n} (${topB.h}안타 ${topB.hr}홈런 ${topB.rbi}타점)`:''}${bestP?` · 최다 탈삼진 ${bestP.n} ${bestP.so}K`:''}</div>${nextHTML.replace('result-line','sub2')}</div>`;
 }
-function renderNotices(){
+function renderNotices(){ setTimeout(updateBadges,0);
   const box = document.getElementById('summaryBox'); if(!box) return;
   buildSummary();
   let msgs = []; try{ msgs = JSON.parse(localStorage.getItem('sn_notices_'+ns())||'[]'); }catch(e){}
@@ -1626,6 +1634,7 @@ function renderNotices(){
 }
 // ===== 도움말 =====
 const HELP_SECTIONS = [
+  ['편의 기능','라인업 탭 위쪽 버튼: ⚡추천 라인업(보유 카드로 가장 강한 타순·투수진 자동 편성), 💾프리셋(라인업 3개 저장·불러오기), ⚖카드 비교(두 카드 능력치 나란히 보기). 일정에서 내 경기 박스스코어를 열면 📻경기 중계를 다시 볼 수 있어요(이 기기 최근 30경기). 하단 탭의 빨간 숫자는 읽지 않은 알림·완료된 유학이에요.'],
   ['시즌 진행','한 시즌은 일주일이에요. 일~금 매시 정각(07~24시)에 10팀이 동시에 경기하고, 토요일은 포스트시즌(1~5위)이에요. 주중에 시작하면 일요일 개막 전까지 시범경기(기록·순위 미반영)를 해요. 접속하지 않아도 시간에 맞춰 자동 진행돼요.'],
   ['카드와 코스트','선수 카드는 실제 기록을 바탕으로 능력치·코스트(1~10)·등급(일반·레어·에이스·레전드)이 정해져요. 같은 카드를 또 뽑으면 겹치기(최대 10회, 1회마다 전 능력치 +1), 다 채우면 코스트×100냥으로 돌려받아요.'],
   ['라인업','타순 9명·벤치 5명·투수 11명(선발5·중계4·셋업1·마무리1)을 직접 채워야 내 라인업으로 경기해요. 타순마다 수비 포지션을 정하고, 기록 없는 포지션은 능력치가 깎여요. 선발 투수를 불펜에 쓰면 −15%. 시즌 중 선발 로테이션에서 바꾼 투수는 하루 동안 다시 못 바꿔요.'],
@@ -1647,6 +1656,161 @@ function renderLineupTabs(){
   ['bat','pit','tac'].forEach(k=>{ const el = document.getElementById('lu-'+k); if(el) el.style.display = LU_TAB===k ? 'block' : 'none'; });
   bar.querySelectorAll('[data-lu]').forEach(el=>el.addEventListener('click', ()=>{ LU_TAB = el.dataset.lu; renderLineupTabs(); }));
 }
+
+// ===== 편의 기능: 라인업 프리셋 · 추천 라인업 · 카드 비교 · 경기 중계 다시보기 · 알림 배지 =====
+function stOf(c, label){ const s = c.stats.find(x=>x[0]===label); return s ? s[1] : 0; }
+function cardAvg(c){ const b = boostedCard(c); return b.stats.reduce((a,s)=>a+s[1],0)/b.stats.length; }
+function ownedOf(pred){ const own = loadOwned(); return CARDS.filter(c=>own.has(pkey(c)) && pred(c)); }
+
+// --- 추천 라인업 ---
+function recommendBatters(){
+  const pool = ownedOf(c=>c.pos==='타자');
+  if(pool.length < 9){ alert(`보유한 타자가 ${pool.length}명이에요. 9명 이상 있어야 추천할 수 있어요.`); return false; }
+  const bs = c => { const b = boostedCard(c); return stOf(b,'교타력')*0.3 + stOf(b,'장타력')*0.3 + stOf(b,'선구안')*0.15 + stOf(b,'정신력')*0.1 + stOf(b,'주력')*0.15; };
+  const used = new Set(), pick = {};
+  ['포수','유격수','2루수','중견수','3루수','1루수','좌익수','우익수'].forEach(pos=>{
+    let best = null, bv = -1e9;
+    pool.forEach(c=>{ if(used.has(pkey(c))) return; const f = positionFit(c,pos); const def = f.def!=null ? f.def : stOf(boostedCard(c),'수비력');
+      const v = (bs(c) + def*0.35) * (1 - (f.pen||0)*1.5); if(v>bv){ bv=v; best=c; } });
+    if(best){ pick[pos]=best; used.add(pkey(best)); }
+  });
+  const rest = pool.filter(c=>!used.has(pkey(c))).sort((a,b)=>bs(b)-bs(a));
+  if(rest[0]){ pick['지명타자']=rest[0]; used.add(pkey(rest[0])); }
+  // 타순: 4번 장타, 3번 종합, 1번 출루+발, 2번 교타+선구, 5번 장타, 나머지 종합순
+  let nine = Object.entries(pick).map(([pos,c])=>({pos,c}));
+  const take = f => { nine.sort((x,y)=>f(boostedCard(y.c))-f(boostedCard(x.c))); return nine.shift(); };
+  const o = [];
+  const n4 = take(b=>stOf(b,'장타력')), n3 = take(b=>bs(b)), n1 = take(b=>stOf(b,'주력')*0.45+stOf(b,'교타력')*0.3+stOf(b,'선구안')*0.25), n2 = take(b=>stOf(b,'교타력')*0.55+stOf(b,'선구안')*0.45), n5 = take(b=>stOf(b,'장타력'));
+  o.push(n1,n2,n3,n4,n5); nine.sort((x,y)=>bs(y.c)-bs(x.c)); o.push(...nine);
+  lineup = o.map(x=>x.c); saveLineup(); saveLineupPos(o.map(x=>x.pos));
+  const bench = loadBench(); lineup.forEach(c=>bench.delete(pkey(c))); saveBench(bench);
+  return true;
+}
+function recommendPitchers(){
+  const pool = ownedOf(c=>c.pos!=='타자');
+  if(pool.length < 11){ alert(`보유한 투수가 ${pool.length}명이에요. 11명 이상 있어야 추천할 수 있어요.`); return false; }
+  const used = new Set(), sc = c => cardAvg(c);
+  const best = (pred, n) => { const l = pool.filter(c=>!used.has(pkey(c)) && pred(c)).sort((a,b)=>sc(b)-sc(a)).slice(0,n); l.forEach(c=>used.add(pkey(c))); return l; };
+  let starters = best(c=>c.pos==='선발',5); if(starters.length<5) starters = starters.concat(best(()=>true,5-starters.length));
+  let closer = best(c=>c.pos==='마무리',1); if(!closer.length) closer = best(c=>c.pos!=='선발',1); if(!closer.length) closer = best(()=>true,1);
+  let setup = best(c=>c.pos==='셋업',1); if(!setup.length) setup = best(c=>c.pos!=='선발',1); if(!setup.length) setup = best(()=>true,1);
+  let middle = best(c=>c.pos!=='선발',4); if(middle.length<4) middle = middle.concat(best(()=>true,4-middle.length));
+  const prev = pitcherLineup;
+  pitcherLineup = {starters, middle, setup, closer};
+  if(!savePitcherLineup()){ pitcherLineup = prev || loadPitcherLineup(); return false; }
+  return true;
+}
+function openRecommend(){
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
+    <h3>추천 라인업</h3>
+    <div style="font-size:12px; color:var(--sub); line-height:1.6; margin-bottom:10px">보유 카드 중 훈련·겹치기까지 반영한 능력치로 가장 강한 조합을 짜줘요.<br>· 타순: 포지션별 수비 기록을 고려해 9명 배치 (1번 출루·주력, 2번 교타, 3번 종합, 4·5번 장타)<br>· 투수진: 선발 5 · 중계 4 · 셋업 1 · 마무리 1 (보직 맞는 선수 우선)<br>· 팀컬러·벤치는 바꾸지 않아요</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap"><button class="btn" id="recBoth">타순+투수진 모두</button><button class="btn ghost" id="recBat">타순만</button><button class="btn ghost" id="recPit">투수진만</button></div>`);
+  const done = msg => { document.getElementById('overlay').classList.remove('active'); renderLineup(); renderPitchers(); renderCostBar(); };
+  document.getElementById('recBoth').onclick = ()=>{ const a = recommendBatters(); const b = recommendPitchers(); if(a||b) done(); };
+  document.getElementById('recBat').onclick = ()=>{ if(recommendBatters()) done(); };
+  document.getElementById('recPit').onclick = ()=>{ if(recommendPitchers()) done(); };
+}
+
+// --- 라인업 프리셋 (3칸) ---
+var PRESET_N = 3;
+function loadPresets(){ try{ return JSON.parse(localStorage.getItem('sn_presets_'+ns()+'_'+team)||'{}')||{}; }catch(e){ return {}; } }
+function savePresets(p){ try{ localStorage.setItem('sn_presets_'+ns()+'_'+team, JSON.stringify(p)); }catch(e){} schedulePush(); }
+function presetSave(i){
+  const p = loadPresets(), pl = pitcherLineup || loadPitcherLineup(), pit = {};
+  for(const k of ['starters','middle','setup','closer']) pit[k] = (pl[k]||[]).map(c=>c?pkey(c):null);
+  p[i] = {at: new Date().toISOString(), lineup: (lineup||[]).map(c=>c?pkey(c):null), pos: loadLineupPos(), pit, bench:[...loadBench()]};
+  savePresets(p);
+}
+function presetLoad(i){
+  const s = loadPresets()[i]; if(!s) return;
+  const own = loadOwned(), card = k => k && own.has(migrateKey(k)) ? CARDS.find(c=>pkey(c)===migrateKey(k)) || null : null;
+  const missing = [...(s.lineup||[]), ...Object.values(s.pit||{}).flat()].filter(k=>k && !card(k)).length;
+  lineup = (s.lineup||[]).map(card); while(lineup.length<9) lineup.push(null); saveLineup();
+  if(Array.isArray(s.pos) && s.pos.length===9) saveLineupPos(s.pos);
+  saveBench(new Set((s.bench||[]).filter(k=>own.has(k))));
+  const prev = pitcherLineup, np = {};
+  for(const k of ['starters','middle','setup','closer']) np[k] = (s.pit&&s.pit[k]||[]).map(card);
+  pitcherLineup = np;
+  const ok = savePitcherLineup(); if(!ok) pitcherLineup = prev || loadPitcherLineup();
+  renderLineup(); renderPitchers(); renderCostBar();
+  if(missing) alert(`보유하지 않은 카드 ${missing}장은 빈 자리로 불러왔어요.`);
+}
+function openPresets(){
+  const p = loadPresets();
+  const row = i => { const s = p[i]; const names = s ? (s.lineup||[]).slice(0,4).map(k=>{ const c = k && CARDS.find(x=>pkey(x)===migrateKey(k)); return c ? c.name : '-'; }).join(', ') : '';
+    return `<div style="border:1px solid #e3e8f1; border-radius:10px; padding:10px; margin-bottom:8px">
+      <div style="display:flex; justify-content:space-between; align-items:center"><b>프리셋 ${i}</b><span style="font-size:11px; color:var(--sub)">${s ? new Date(s.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' 저장' : '비어 있음'}</span></div>
+      ${s ? `<div style="font-size:11.5px; color:var(--sub); margin:4px 0">1~4번: ${names} …</div>` : ''}
+      <div style="display:flex; gap:6px; margin-top:6px"><button class="btn ghost" data-psave="${i}">현재 라인업 저장</button>${s?`<button class="btn" data-pload="${i}">불러오기</button>`:''}</div></div>`; };
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
+    <h3>라인업 프리셋</h3><div style="font-size:12px; color:var(--sub); margin-bottom:10px">타순·수비 포지션·투수진·벤치를 통째로 저장해 두고 바꿔 끼울 수 있어요. (시즌 중 선발 투수 교체 잠금은 그대로 적용돼요)</div>
+    ${Array.from({length:PRESET_N},(_,k)=>row(k+1)).join('')}`);
+  document.querySelectorAll('[data-psave]').forEach(b=>b.onclick=()=>{ const i=b.dataset.psave; if(loadPresets()[i] && !confirm(`프리셋 ${i}을(를) 현재 라인업으로 덮어쓸까요?`)) return; presetSave(i); openPresets(); });
+  document.querySelectorAll('[data-pload]').forEach(b=>b.onclick=()=>{ document.getElementById('overlay').classList.remove('active'); presetLoad(b.dataset.pload); });
+}
+
+// --- 카드 비교 ---
+function openCompare(ka, kb){
+  const own = ownedOf(()=>true).sort((a,b)=>(a.pos==='타자'?0:1)-(b.pos==='타자'?0:1) || b.cost-a.cost || (a.name<b.name?-1:1));
+  if(own.length<2){ alert('비교하려면 카드가 2장 이상 있어야 해요.'); return; }
+  ka = ka || pkey(own[0]); kb = kb || pkey(own.find(c=>pkey(c)!==ka && (c.pos==='타자')===(CARDS.find(x=>pkey(x)===ka).pos==='타자')) || own[1]);
+  const opt = sel => own.map(c=>`<option value="${pkey(c).replace(/"/g,'&quot;')}" ${pkey(c)===sel?'selected':''}>${c.name} (${c.team}·${c.pos==='타자'?c.fieldpos:c.pos}) ★${c.cost}</option>`).join('');
+  const A = boostedCard(CARDS.find(c=>pkey(c)===ka)), B = boostedCard(CARDS.find(c=>pkey(c)===kb));
+  const same = (A.pos==='타자') === (B.pos==='타자');
+  const head = c => `<div style="flex:1; min-width:0; text-align:center; background:${TC[c.team]}; color:#fff; border-radius:10px; padding:8px 4px"><div style="font-weight:900; font-size:15px">${c.name}</div><div style="font-size:11px; opacity:.9">${c.team} · ${c.pos==='타자'?c.fieldpos:c.pos} · ${c.rarity} · ★${c.cost}</div></div>`;
+  let rows = '';
+  if(same){
+    const labels = A.stats.map(s=>s[0]);
+    rows = labels.map(l=>{ const a = stOf(A,l), b = stOf(B,l), mx = Math.max(100,a,b), d = a-b;
+      const bar = (v,col,right) => `<div style="flex:1; height:8px; background:#eef1f6; border-radius:4px; overflow:hidden; display:flex; justify-content:${right?'flex-start':'flex-end'}"><div style="width:${v/mx*100}%; background:${col}"></div></div>`;
+      return `<div style="display:grid; grid-template-columns:32px 1fr 64px 1fr 32px; gap:6px; align-items:center; font-size:12px; margin:5px 0">
+        <b style="text-align:right; color:${d>0?'#1a8a3a':d<0?'var(--sub)':'var(--ink)'}">${a}</b>${bar(a, TC[A.team], false)}<div style="text-align:center; color:var(--sub); font-size:11px">${l}</div>${bar(b, TC[B.team], true)}<b style="color:${d<0?'#1a8a3a':d>0?'var(--sub)':'var(--ink)'}">${b}</b></div>`; }).join('');
+    const ta = Math.round(cardAvg(A)), tb = Math.round(cardAvg(B));
+    rows += `<div style="text-align:center; font-size:12.5px; margin-top:8px">능력치 평균 <b>${ta}</b> vs <b>${tb}</b></div>`;
+  } else rows = `<div class="result-line" style="margin-top:10px">타자와 투수는 능력치 항목이 달라서 같은 종류끼리만 비교할 수 있어요.</div>`;
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
+    <h3>카드 비교</h3><div style="font-size:11px; color:var(--sub); margin-bottom:8px">보유 카드 · 훈련·블록·겹치기 반영 능력치</div>
+    <div style="display:flex; gap:6px; margin-bottom:8px"><select id="cmpA" style="flex:1; min-width:0; padding:6px; border-radius:8px; border:1.5px solid #d8e0ee">${opt(ka)}</select><select id="cmpB" style="flex:1; min-width:0; padding:6px; border-radius:8px; border:1.5px solid #d8e0ee">${opt(kb)}</select></div>
+    <div style="display:flex; gap:8px; margin-bottom:6px">${head(A)}${head(B)}</div>${rows}`);
+  document.getElementById('cmpA').onchange = e=>openCompare(e.target.value, kb);
+  document.getElementById('cmpB').onchange = e=>openCompare(ka, e.target.value);
+}
+
+// --- 경기 중계 다시보기 (내 경기, 이 기기에 최근 30경기 보관) ---
+var PBP_MAX = 30;
+function pbpSave(k, log){
+  try{
+    const o = JSON.parse(localStorage.getItem('sn_pbp_'+ns())||'{"order":[],"g":{}}');
+    o.g[k] = log.map(e => (e.t==='inn'?'#':e.t==='half'?'@':e.t==='final'?'!':(e.score?'*':'-')) + e.text);
+    o.order = o.order.filter(x=>x!==k); o.order.push(k);
+    while(o.order.length > PBP_MAX){ delete o.g[o.order.shift()]; }
+    localStorage.setItem('sn_pbp_'+ns(), JSON.stringify(o));
+  }catch(e){}
+}
+function pbpGet(k){ try{ return (JSON.parse(localStorage.getItem('sn_pbp_'+ns())||'{}').g||{})[k] || null; }catch(e){ return null; } }
+function showPBP(k, title){
+  const L = pbpGet(k); if(!L) return;
+  let html = '', open = false;
+  L.forEach(s=>{ const t = s[0], x = s.slice(1);
+    if(t==='#'){ if(open) html += '</div>'; html += `<div style="margin-top:10px; font-weight:900; color:var(--navy)">${x}</div><div>`; open = true; }
+    else if(t==='@') html += `<div style="font-size:11.5px; font-weight:800; color:var(--sub); margin:6px 0 2px">${x}</div>`;
+    else if(t==='!') html += `${open?'</div>':''}<div style="margin-top:12px; font-weight:900; text-align:center">${x}</div>`, open=false;
+    else html += `<div style="font-size:12px; padding:2px 0 2px 8px; border-left:3px solid ${t==='*'?'var(--gold)':'#eef1f6'}; ${t==='*'?'font-weight:800':''}">${x}</div>`;
+  });
+  if(open) html += '</div>';
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>${title||'경기 중계'}</h3><div style="font-size:11px; color:var(--sub)">노란 줄 = 득점 장면</div><div style="max-height:62vh; overflow-y:auto">${html}</div>`);
+}
+
+// --- 알림 배지 (하단 탭) ---
+function updateBadges(){
+  try{
+    let n = 0; try{ n = (JSON.parse(localStorage.getItem('sn_notices_'+ns())||'[]')||[]).filter(m=>!m.read).length; }catch(e){}
+    const ab = loadAbroad(), now = new Date(); const st = Object.values(ab).filter(a=>a && a.endsAt && new Date(a.endsAt)<=now).length;
+    const set = (v,c) => { const el = document.querySelector('.navbtn[data-v="'+v+'"]'); if(el){ if(c) el.setAttribute('data-badge', c>9?'9+':c); else el.removeAttribute('data-badge'); } };
+    set('home', n); set('training', st);
+  }catch(e){}
+}
+setInterval(updateBadges, 60000);
 
 // ===== 공유(DB) 시즌 =====
 async function getSharedSeason(){
@@ -1973,7 +2137,7 @@ function batterMiniCard(c, extraAttrs){
   if(!c) return `<div class="minicard empty" ${extraAttrs||''}><div class="av">?</div><div class="info"><div class="nm">비어있음</div></div></div>`;
   const other = c.team!==team;
   return `<div class="minicard filled" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av" style="background:linear-gradient(135deg,${TC[c.team]},#0a1530)">${c.name[0]}</div>
-    <div class="info"><div class="nm">${c.name}</div><div class="ps">${posAbbr(c.fieldpos)}${other?' · '+c.team:''}</div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
+    <div class="info"><div class="nm">${c.name}</div><div class="ps">${posAbbr(c.fieldpos)} · <span style="color:${TC[c.team]}; font-weight:800">${c.team}</span></div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
 }
 function renderCostBar(){
   const batTotal = (lineup||[]).filter(Boolean).reduce((s,c)=>s+c.cost,0);
@@ -2149,6 +2313,9 @@ function renderLineup(){
 }
 document.getElementById('resetBtn').addEventListener('click', ()=>{ lineup=new Array(9).fill(null); saveLineup(); renderLineup(); renderHome(); });
 document.getElementById('autoPosBtn').addEventListener('click', ()=>{ saveLineupPos(autoLineupPos(lineup||[])); renderLineup(); });
+document.getElementById('recBtn').addEventListener('click', ()=>openRecommend());
+document.getElementById('presetBtn').addEventListener('click', ()=>openPresets());
+document.getElementById('cmpBtn').addEventListener('click', ()=>openCompare());
 
 // ===== pitcher lineup =====
 const ROLE_LABELS = {starters:'선발(5)', middle:'중계 - 필승/박빙/추격/패전(4)', setup:'셋업(1)', closer:'마무리(1)'};
@@ -2183,7 +2350,7 @@ function pitcherMiniCard(c, extraAttrs){
   if(!c) return `<div class="minicard empty" ${extraAttrs||''}><div class="av">?</div><div class="info"><div class="nm">비어있음</div></div></div>`;
   const other = c.team!==team;
   return `<div class="minicard filled" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av" style="background:linear-gradient(135deg,${TC[c.team]},#0a1530)">${c.name[0]}</div>
-    <div class="info"><div class="nm">${c.name}</div><div class="ps">${c.pos}${other?' · '+c.team:''}</div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
+    <div class="info"><div class="nm">${c.name}</div><div class="ps">${c.pos} · <span style="color:${TC[c.team]}; font-weight:800">${c.team}</span></div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
 }
 function assignPitcherToSlot(c, cat, i){
   if(c.pos==='선발' && cat!=='starters'){
@@ -2502,7 +2669,7 @@ function fmtRemain(ms){
   const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000);
   return `${h}시간 ${m}분 남음`;
 }
-function renderTraining(){
+function renderTraining(){ setTimeout(updateBadges,0);
   document.documentElement.style.setProperty('--tc', TC[team]);
   const blocks = loadBlocks();
   document.getElementById('blockCount').textContent = `(${blocks.length}개)`;
