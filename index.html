@@ -1375,9 +1375,17 @@ function renderLineup(){
     el.addEventListener('drop', e=>{
       e.preventDefault(); el.classList.remove('dragover');
       const k = e.dataTransfer.getData('text/plain'); if(!k) return;
-      const c = CARDS.find(x=>pkey(x)===k); if(!c) return;
-      const dupIdx = lineup.findIndex(x=>x && pkey(x)===k); if(dupIdx>-1) lineup[dupIdx]=null;
-      lineup[+el.dataset.i] = c; saveLineup(); renderLineup(); renderHome();
+      const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
+      const i = +el.dataset.i, j = lineup.findIndex(x=>x && pkey(x)===k), occupant = lineup[i];
+      if(j===i) return;
+      if(j>-1){ // 타순끼리: 자리 맞바꿈 + 포지션도 선수를 따라감
+        const pos = loadLineupPos(); lineup[j] = occupant; lineup[i] = c; [pos[i], pos[j]] = [pos[j], pos[i]]; saveLineupPos(pos);
+      } else {
+        const arr = [...loadBench()], bi = arr.indexOf(k);
+        if(bi>-1){ if(occupant) arr[bi] = pkey(occupant); else arr.splice(bi,1); saveBench(new Set(arr)); } // 벤치 선수와 자리 교환
+        lineup[i] = c; // 대기명단에서 온 경우 기존 선수는 대기명단으로 (그 타순 포지션은 유지)
+      }
+      saveLineup(); renderLineup(); renderHome();
     });
   });
   attachFlip(slotsDiv);
@@ -1393,18 +1401,30 @@ function renderLineup(){
   const benchDiv = document.getElementById('benchPool');
   benchDiv.innerHTML = Array.from({length:BENCH_MAX}, (_,i)=>{ const c = benchCards[i];
     return `<div style="display:flex; flex-direction:column; gap:3px; flex-shrink:0; width:78px"><div style="font-size:10px; font-weight:800; color:var(--sub); text-align:center">벤치 ${i+1}</div>${batterMiniCard(c||null, c?`data-n="${pkey(c)}" draggable="true"`:'')}</div>`; }).join('');
-  benchDiv.addEventListener('dragover', e=>{ e.preventDefault(); benchDiv.classList.add('dragover'); });
-  benchDiv.addEventListener('dragleave', ()=>benchDiv.classList.remove('dragover'));
-  benchDiv.addEventListener('drop', e=>{
+  benchDiv.ondragover = e=>{ e.preventDefault(); benchDiv.classList.add('dragover'); };
+  benchDiv.ondragleave = ()=>benchDiv.classList.remove('dragover');
+  benchDiv.ondrop = e=>{
     e.preventDefault(); benchDiv.classList.remove('dragover');
     const k = e.dataTransfer.getData('text/plain'); if(!k) return;
     const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
     if(!loadBench().has(pkey(c)) && loadBench().size>=BENCH_MAX){ alert(`벤치는 최대 ${BENCH_MAX}명까지예요. 벤치 선수를 먼저 빼주세요.`); return; }
     const dupIdx = lineup.findIndex(x=>x && pkey(x)===k); if(dupIdx>-1){ lineup[dupIdx]=null; saveLineup(); }
     benchAdd(pkey(c)); renderLineup(); renderHome();
-  });
+  };
   benchDiv.querySelectorAll('.minicard.filled').forEach(el=>{
     el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
+    el.addEventListener('dragover', e=>{ e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', ()=>el.classList.remove('dragover'));
+    el.addEventListener('drop', e=>{ // 벤치 카드 위에 놓으면 자리 교환
+      e.preventDefault(); e.stopPropagation(); el.classList.remove('dragover'); benchDiv.classList.remove('dragover');
+      const k = e.dataTransfer.getData('text/plain'), target = el.dataset.n; if(!k || k===target) return;
+      const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
+      const arr = [...loadBench()], ti = arr.indexOf(target), si = arr.indexOf(k), j = lineup.findIndex(x=>x && pkey(x)===k);
+      if(j>-1){ lineup[j] = CARDS.find(x=>pkey(x)===target); arr[ti] = k; saveLineup(); } // 타순 ↔ 벤치
+      else if(si>-1){ [arr[ti], arr[si]] = [arr[si], arr[ti]]; } // 벤치끼리 순서 교환
+      else { arr[ti] = k; } // 대기명단 → 벤치 (원래 벤치 선수는 대기명단으로)
+      saveBench(new Set(arr)); renderLineup(); renderHome();
+    });
     el.addEventListener('click', ()=>{
       const b = loadBench(); b.delete(el.dataset.n); saveBench(b); renderLineup();
     });
@@ -1469,10 +1489,18 @@ function assignPitcherToSlot(c, cat, i){
   if(c.pos==='선발' && cat!=='starters'){
     if(!confirm(`${c.name}은(는) 선발 투수예요. 불펜(${ROLE_LABELS[cat]})으로 기용하면 능력치가 15% 하락해요. 그래도 배치할까요?`)) return false;
   }
+  // 투수진끼리 옮기면 자리를 맞바꿈(기존 선수가 대기명단으로 빠지지 않음)
+  let from = null;
   for(const k of ['starters','middle','setup','closer']){
     const idx = pitcherLineup[k].findIndex(x=>x && pkey(x)===pkey(c));
-    if(idx>-1) pitcherLineup[k][idx]=null;
+    if(idx>-1) from = {k, idx};
   }
+  if(from && from.k===cat && from.idx===i) return false;
+  const occupant = pitcherLineup[cat][i];
+  if(from && occupant && occupant.pos==='선발' && from.k!=='starters'){
+    if(!confirm(`${occupant.name}은(는) 선발 투수예요. 자리를 바꾸면 불펜(${ROLE_LABELS[from.k]})으로 가서 능력치가 15% 하락해요. 그래도 바꿀까요?`)) return false;
+  }
+  if(from) pitcherLineup[from.k][from.idx] = occupant || null;
   pitcherLineup[cat][i] = c;
   savePitcherLineup(); renderPitchers(); renderCostBar();
   return true;
