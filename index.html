@@ -128,7 +128,11 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
     <p class="loginSub">닉네임으로 빠르게 시작하기</p>
     <input id="nicknameInput" placeholder="닉네임 입력" maxlength="12" class="loginInput">
     <button class="btn" style="width:100%; margin-top:10px" id="nicknameStartBtn">시작하기</button>
-    <div class="loginFuture">이메일·비밀번호 회원가입은 준비 중이에요. 지금은 닉네임만으로 계정과 연결돼 진행 상황이 저장돼요.</div>
+    <div id="fbLoginBox" style="display:none; margin-top:12px">
+      <button class="btn ghost" style="width:100%" id="googleLoginBtn">G  구글 로그인 (PC·모바일 동기화)</button>
+      <div id="fbLoginStatus" style="font-size:11px; color:var(--sub); margin-top:6px"></div>
+    </div>
+    <div class="loginFuture" id="loginFutureNote">이메일·비밀번호 회원가입은 준비 중이에요. 지금은 닉네임만으로 계정과 연결돼 진행 상황이 저장돼요.</div>
   </div>
 </div>
 <div class="loginpage" id="teamPickPage">
@@ -283,7 +287,30 @@ function collectSyncPayload(){
   });
   return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, updatedAt: new Date().toISOString() };
 }
-async function pushNow(){
+// ----- 기기 간 동기화 보호: 빈 새 기기가 다른 기기의 진행을 덮어쓰지 않게 -----
+function localSummary(nick){
+  let ob=[], owned=[]; try{ ob = JSON.parse(localStorage.getItem('sn_onboarded_'+nick)||'[]'); owned = JSON.parse(localStorage.getItem('sn_owned_'+nick)||'[]'); }catch(e){}
+  const lock = localStorage.getItem('sn_teamlock_'+nick)||'';
+  return {has: ob.length>0 || !!lock, lock: lock || ob[0] || '', owned: owned.length};
+}
+function cloudSummary(sv){
+  let ob=[], owned=[]; try{ ob = JSON.parse(sv.onboarded||'[]'); owned = JSON.parse(sv.owned||'[]'); }catch(e){}
+  return {has: ob.length>0 || !!sv.teamlock, lock: sv.teamlock || ob[0] || sv.lastTeam || '', owned: owned.length, at: sv.updatedAt};
+}
+// 반환: 'pulled'(클라우드 적용) | 'push'(이 기기 기준으로 올림) | 'same'
+function reconcileNick(nick, cloud){
+  const sv = cloud && cloud.saves && cloud.saves[nick];
+  if(!sv) return 'push';
+  const C = cloudSummary(sv), L = localSummary(nick);
+  if(!C.has) return 'push';
+  if(!L.has){ applySyncPayloadForNick(nick, sv); localStorage.setItem('sn_syncedAt_'+nick, sv.updatedAt||''); return 'pulled'; }
+  if(localStorage.getItem('sn_syncedAt_'+nick) === (sv.updatedAt||'')) return 'same';
+  if(L.lock===C.lock){ applySyncPayloadForNick(nick, sv); localStorage.setItem('sn_syncedAt_'+nick, sv.updatedAt||''); return 'pulled'; } // 같은 진행 → 최신(다른 기기) 반영
+  const useCloud = confirm(`'${nick}' 저장본이 기기마다 달라요.\n\n클라우드(다른 기기): ${C.lock} · 카드 ${C.owned}장${C.at?` · ${new Date(C.at).toLocaleString()}`:''}\n이 기기: ${L.lock} · 카드 ${L.owned}장\n\n확인 = 클라우드 저장본 불러오기\n취소 = 이 기기 진행 유지(클라우드를 덮어써요)`);
+  if(useCloud){ applySyncPayloadForNick(nick, sv); localStorage.setItem('sn_syncedAt_'+nick, sv.updatedAt||''); return 'pulled'; }
+  return 'push';
+}
+async function pushNow(force){
   if(!DB_READY || !UID) return;
   if(pushInFlight){ pushQueued=true; return; }
   pushInFlight = true;
@@ -292,8 +319,13 @@ async function pushNow(){
     let existing = {};
     try{ const snap = await ref.get(); if(snap.exists) existing = snap.data()||{}; }catch(e){}
     const saves = existing.saves || {};
-    saves[ns()] = collectSyncPayload();
+    const cloudSv = saves[ns()];
+    // 이 기기가 아직 빈 상태(입단 전)인데 클라우드에 진행이 있으면 덮어쓰지 않음 (초기화 버튼은 force)
+    if(!force && cloudSv && cloudSummary(cloudSv).has && !localSummary(ns()).has){ pushInFlight = false; return; }
+    const payload = collectSyncPayload();
+    saves[ns()] = payload;
     await ref.set({ saves, currentNickname: ns(), updatedAt: new Date().toISOString() });
+    localStorage.setItem('sn_syncedAt_'+ns(), payload.updatedAt);
   }catch(e){ /* 저장 실패 시 다음 변경 때 재시도 */ }
   pushInFlight = false;
   if(pushQueued){ pushQueued=false; pushNow(); }
@@ -316,25 +348,106 @@ function applySyncPayloadForNick(nick, data){
   if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team_'+nick, team); }
   if(data.teamlock) { localStorage.setItem('sn_teamlock_'+nick, data.teamlock); localStorage.setItem('sn_team_'+nick, data.teamlock); team = data.teamlock; }
 }
-let CLOUD_SYNC_STATUS = '확인 중...';
-async function initCloudSync(){
-  // claude.ai 밖(GitHub Pages 등)에서는 클라우드 기능이 없으므로 이 브라우저 저장소(localStorage)로만 진행
-  if(typeof claude==='undefined' || !claude || typeof claude.use!=='function'){ CLOUD_SYNC_STATUS = '로컬 저장 모드(이 브라우저에만 저장돼요)'; try{ renderLeagueTeams(); }catch(e){} return; }
+let CLOUD_SYNC_STATUS = '확인 중...', CLOUD_FORCE_PUSH = false, CLOUD_INIT = null;
+// ===== Firebase (claude.ai 밖 — GitHub Pages 등에서 기기 간 동기화) =====
+const FB_CFG = {
+  apiKey: "AIzaSyBP-m-0WVPvy5-uIZS7OdF01mNRnADI5GU",
+  authDomain: "diamond-chronicle.firebaseapp.com",
+  projectId: "diamond-chronicle",
+  storageBucket: "diamond-chronicle.firebasestorage.app",
+  messagingSenderId: "1077472526921",
+  appId: "1:1077472526921:web:d194ec33889f744f473598"
+};
+const FB_VER = '10.12.2';
+let FB = null, USER_LABEL = '';
+function hasClaudeRuntime(){ return typeof claude!=='undefined' && claude && typeof claude.use==='function'; }
+async function loadFirebase(){
+  if(FB) return FB;
+  if(window.__FB_MOCK){ FB = window.__FB_MOCK; return FB; } // 테스트용
+  const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+  const [A, U, F] = await Promise.all([import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-firestore.js')]);
+  const app = A.initializeApp(FB_CFG);
+  FB = {auth: U.getAuth(app), db: F.getFirestore(app), U, F};
+  return FB;
+}
+function fbCurrentUser(){ return new Promise(res=>{ const un = FB.U.onAuthStateChanged(FB.auth, u=>{ un(); res(u); }); }); }
+// 게임 코드가 쓰는 DB 인터페이스(doc().get/set/delete/acquire, collection().get)를 Firestore로 구현
+function makeFirestoreDB(){
+  const {F, db} = FB;
+  const clean = o => JSON.parse(JSON.stringify(o)); // undefined 제거(Firestore는 undefined 저장 불가)
+  return {
+    doc: (path)=>{
+      const ref = F.doc(db, path);
+      return {
+        get: async()=>{ const sn = await F.getDoc(ref); return {exists: sn.exists(), data: ()=>sn.data()}; },
+        set: async(d)=>F.setDoc(ref, clean(d)),
+        delete: async()=>F.deleteDoc(ref),
+        acquire: async({holder, ttlMs})=>{ // 잠금: locks/<경로> 문서를 트랜잭션으로 점유
+          const lref = F.doc(db, 'locks/' + path.replace(/\//g,'__'));
+          try{ return await F.runTransaction(db, async tx=>{
+            const sn = await tx.get(lref), now = Date.now();
+            if(sn.exists()){ const d = sn.data(); if(d.holder!==holder && d.exp>now) return {acquired:false}; }
+            tx.set(lref, {holder, exp: now + (ttlMs||8000)}); return {acquired:true};
+          }); }catch(e){ return {acquired:false}; }
+        }
+      };
+    },
+    collection: (path)=>({ get: async()=>{ const qs = await F.getDocs(F.collection(db, path)); return {docs: qs.docs.map(d=>({id:d.id, data:()=>d.data()}))}; } })
+  };
+}
+function updateLoginUI(){
+  const box = document.getElementById('fbLoginBox'); if(!box) return;
+  if(hasClaudeRuntime()){ box.style.display='none'; return; }
+  box.style.display = 'block';
+  const note = document.getElementById('loginFutureNote'); if(note) note.textContent = '구글 로그인 없이 시작하면 이 브라우저에만 저장돼요. 로그인하면 PC·모바일 진행이 이어지고 공유 시즌에 참가해요.';
+  const st = document.getElementById('fbLoginStatus'), btn = document.getElementById('googleLoginBtn');
+  if(UID && DB_READY){ st.textContent = `✓ ${USER_LABEL||'구글 계정'} 로그인됨 · 동기화 켜짐`; btn.style.display='none'; }
+  else { st.textContent = CLOUD_SYNC_STATUS; btn.style.display='block'; }
+}
+async function googleLogin(){
+  const st = document.getElementById('fbLoginStatus'); if(st) st.textContent = '로그인 창을 여는 중...';
   try{
+    await loadFirebase();
+    const provider = new FB.U.GoogleAuthProvider();
+    try{ await FB.U.signInWithPopup(FB.auth, provider); }
+    catch(e){ if(e && (e.code==='auth/popup-blocked' || e.code==='auth/operation-not-supported-in-this-environment')) return FB.U.signInWithRedirect(FB.auth, provider); throw e; }
+    CLOUD_INIT = initCloudSync(); await CLOUD_INIT;
+    if(getNickname()){ // 이미 닉네임으로 들어와 있으면 그 닉네임 저장본과 맞춤
+      const snap = await DB.doc('data/users/'+UID+'/gamedata').get(); const how = reconcileNick(getNickname(), snap.exists ? snap.data() : null);
+      if(how==='push') pushNow(true);
+      team = localStorage.getItem('sn_team_'+ns()) || team; applyTeamLock(); lineup = loadLineupObjs(); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
+      try{ refreshCurrencyDisplay(); renderHome(); }catch(e){}
+    }
+  }catch(e){ if(st) st.textContent = '로그인 실패: ' + (e && (e.code||e.message) || e); }
+  updateLoginUI();
+}
+async function getCloudBackend(){
+  if(hasClaudeRuntime()){
     const user = await claude.use('user');
-    if(!user){ CLOUD_SYNC_STATUS = 'user capability 없음(claude.use("user")가 null)'; renderLeagueTeams(); return; }
-    UID = await user.id();
-    if(!UID){ CLOUD_SYNC_STATUS = '계정 UID를 가져오지 못함(user.id()가 비어있음)'; renderLeagueTeams(); return; }
-    const db = await claude.use('db');
-    if(!db){ CLOUD_SYNC_STATUS = 'db capability 없음(claude.use("db")가 null)'; renderLeagueTeams(); return; }
-    DB = db;
+    if(!user) throw new Error('user capability 없음');
+    const uid = await user.id(); if(!uid) throw new Error('계정 UID를 가져오지 못함');
+    const db = await claude.use('db'); if(!db) throw new Error('db capability 없음');
+    return {uid, db, label:''};
+  }
+  await loadFirebase();
+  const u = FB.auth.currentUser || await fbCurrentUser();
+  if(!u) return null; // 로그인 전
+  return {uid: u.uid, db: makeFirestoreDB(), label: u.email || u.displayName || ''};
+}
+async function initCloudSync(){
+  try{
+    const be = await getCloudBackend();
+    if(!be){ CLOUD_SYNC_STATUS = '구글 로그인 전 — 지금은 이 브라우저에만 저장돼요'; updateLoginUI(); renderLeagueTeams(); return; }
+    UID = be.uid; DB = be.db; USER_LABEL = be.label;
     const snap = await DB.doc('data/users/'+UID+'/gamedata').get();
     if(snap.exists){
       const cloud = snap.data();
       let nick = getNickname();
       if(!nick && cloud.currentNickname){ nick = cloud.currentNickname; setNickname(nick); hideNicknameGate(); }
-      if(nick && cloud.saves && cloud.saves[nick]){
-        applySyncPayloadForNick(nick, cloud.saves[nick]);
+      const how = nick ? reconcileNick(nick, cloud) : 'push';
+      if(how==='push') CLOUD_FORCE_PUSH = true;
+      if(how==='pulled'){
+        applyTeamLock();
         lineup = loadLineupObjs();
         pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
         const sel = document.getElementById('teamSel'); if(sel) sel.value = team;
@@ -344,18 +457,23 @@ async function initCloudSync(){
       }
     }
     DB_READY = true;
-    CLOUD_SYNC_STATUS = '정상 연결됨 (UID: '+UID+')';
-    schedulePush(); // 최초 상태도 클라우드에 한 번 올려둠
-  }catch(e){ CLOUD_SYNC_STATUS = '예외 발생: ' + (e && e.message ? e.message : e); }
+    CLOUD_SYNC_STATUS = hasClaudeRuntime() ? '정상 연결됨 (UID: '+UID+')' : '구글 계정 동기화 켜짐 ('+(USER_LABEL||UID)+')';
+    if(CLOUD_FORCE_PUSH){ CLOUD_FORCE_PUSH = false; pushNow(true); } else schedulePush(); // 최초 상태도 클라우드에 한 번 올려둠
+  }catch(e){ CLOUD_SYNC_STATUS = '클라우드 연결 실패: ' + (e && (e.code||e.message) ? (e.code||e.message) : e) + ' — 이 브라우저에만 저장돼요'; }
+  updateLoginUI();
   renderLeagueTeams();
 }
-initCloudSync();
+document.getElementById('googleLoginBtn').addEventListener('click', googleLogin);
+CLOUD_INIT = initCloudSync();
 
 // ===== 리그 참가 (팀 등록) =====
 const TEAM_CODE = {'삼성':'samsung','KT':'kt','LG':'lg','KIA':'kia','두산':'doosan','NC':'nc','SSG':'ssg','롯데':'lotte','한화':'hanwha','키움':'kiwoom'};
 async function renderLeagueTeams(){
   const box = document.getElementById('leagueTeamsBox');
-  if(!DB_READY){ box.textContent = '계정에 연결되면 여기서 팀을 등록해 다른 사람과 리그를 나눠 맡을 수 있어요. [진단: '+CLOUD_SYNC_STATUS+']'; return; }
+  if(!DB_READY){
+    if(!hasClaudeRuntime()){ box.innerHTML = `구글 로그인하면 PC·모바일 진행이 이어지고, 다른 사람과 같은 시즌을 함께 진행해요.<br><button class="btn ghost" id="homeGoogleLogin" style="margin-top:6px; padding:6px 14px; font-size:12px">구글 로그인</button><div style="font-size:11px; color:var(--sub); margin-top:4px">${CLOUD_SYNC_STATUS}</div>`; const b = document.getElementById('homeGoogleLogin'); if(b) b.addEventListener('click', googleLogin); return; }
+    box.textContent = '계정에 연결되면 여기서 팀을 등록해 다른 사람과 리그를 나눠 맡을 수 있어요. [진단: '+CLOUD_SYNC_STATUS+']'; return;
+  }
   box.textContent = '팀 등록 현황을 불러오는 중...';
   try{
     const snap = await DB.collection('teams').get();
@@ -461,7 +579,7 @@ document.getElementById('resetNickBtn').addEventListener('click', async ()=>{
   const del = [];
   for(let i=0;i<localStorage.length;i++){ const k = localStorage.key(i); if(k && k.startsWith('sn_') && k!=='sn_nickname' && (k.endsWith('_'+nick) || k.includes('_'+nick+'_'))) del.push(k); }
   del.forEach(k=>localStorage.removeItem(k));
-  if(DB_READY){ try{ await pushNow(); }catch(e){} } // 클라우드 세이브도 빈 상태로 덮어쓰기
+  if(DB_READY){ try{ await pushNow(true); }catch(e){} } // 클라우드 세이브도 빈 상태로 덮어쓰기
   team = '삼성'; lineup = new Array(9).fill(null); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
   alert('초기화했어요. 팀 선택부터 다시 시작해요.');
   location.reload();
@@ -472,9 +590,16 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
   hideTeamPickPage();
   document.getElementById('nicknameGate').classList.add('active');
 });
-document.getElementById('nicknameStartBtn').addEventListener('click', ()=>{
+document.getElementById('nicknameStartBtn').addEventListener('click', async ()=>{
   const v = document.getElementById('nicknameInput').value.trim();
   if(!v){ alert('닉네임을 입력해주세요.'); return; }
+  const btn = document.getElementById('nicknameStartBtn'); btn.disabled = true; btn.textContent = '저장본 확인 중...';
+  localStorage.setItem('sn_nickname', v); // (push 전에) 다른 기기 저장본부터 확인
+  try{
+    if(CLOUD_INIT) await CLOUD_INIT;
+    if(DB_READY){ const snap = await DB.doc('data/users/'+UID+'/gamedata').get(); const how = reconcileNick(v, snap.exists ? snap.data() : null); if(how==='push') pushNow(true); }
+  }catch(e){}
+  btn.disabled = false; btn.textContent = '시작하기';
   setNickname(v);
   hideNicknameGate();
   // 닉네임별 팀으로 전환 (고정된 팀이 있으면 그 팀)
