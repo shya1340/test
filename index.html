@@ -760,7 +760,7 @@ function triggerOnboarding(t){
   function miniPick(c, sel){
     const isSel = sel && sel.name===c.name;
     return `<div class="minicard ${isSel?'filled':''}" data-pk="${pkey(c)}" style="${isSel?'outline:2px solid var(--gold)':''}"><div class="av" style="background:linear-gradient(135deg,${TC[c.team]},#0a1530)">${c.name[0]}</div>
-      <div class="info"><div class="nm">${c.name}</div><div class="ps" style="font-weight:800; color:var(--navy)">${c.pos==='타자'?c.fieldpos:c.pos}</div><div class="cst">★${c.cost}</div></div></div>`;
+      <div class="info"><div class="nm">${c.name}</div><div class="ps" style="font-weight:800; color:var(--navy)">${c.pos==='타자'?c.fieldpos:c.pos} · <span style="color:${TC[c.team]}">${c.team}</span></div><div class="cst">★${c.cost}</div></div></div>`;
   }
   function draw(){
     document.getElementById('modalBody').innerHTML = `
@@ -821,7 +821,7 @@ function renderHome(){
   document.getElementById('homeCard').style.background = `linear-gradient(135deg, ${TC[team]}, #0a1530)`;
   document.getElementById('homeCard').innerHTML = `<div class="r1"><h3>${team}</h3><div style="font-size:11px; opacity:.8">1군 26명</div></div><div class="sub2">감독 ${getNickname()||'익명'} · 카드 도감 · 영입 · 라인업까지 한 곳에서 관리하세요</div>`;
   const lu = currentLineup();
-  document.getElementById('homeLineupPreview').textContent = lu.map(c=>c.name).join(' - ');
+  document.getElementById('homeLineupPreview').textContent = lu.map(c=>`${c.name}(${c.team})`).join(' - ');
   renderDaily(); renderNotices();
   if(teamLock() && !localStorage.getItem('sn_helpseen_'+ns()) && !document.getElementById('overlay').classList.contains('active')) setTimeout(()=>{ if(!document.getElementById('overlay').classList.contains('active') && !document.querySelector('.loginpage.active')) openHelp(); }, 800);
   if(!LAST_SEASON && !HOME_SEASON_LOADING){ HOME_SEASON_LOADING = true; renderSchedule().then(()=>renderDaily()).catch(()=>{}); } // 오늘 승수 계산용
@@ -2681,7 +2681,7 @@ function renderTraining(){ setTimeout(updateBadges,0);
     const abroad = loadAbroad()[pkey(c)];
     const dn = abroad && abroad.dest ? ((STUDY_DESTS.find(x=>x.id===abroad.dest)||{}).name||'') + ' ' : '';
     const status = abroad ? dn + (new Date(abroad.endsAt) <= new Date() ? '유학 완료!' : fmtRemain(new Date(abroad.endsAt)-new Date())) : '';
-    return `<div class="pcard" data-n="${pkey(c)}"><div class="n">${c.name} <span style="font-weight:400;color:var(--sub)">(${isB?'타자':c.pos}${c.team!==team?' · '+c.team:''})</span></div><div class="m">${c.tier}${dupeCount(c)?` · 겹치기 ${dupeCount(c)}/${DUPE_MAX}`:''}${status? ' · '+status:''}</div></div>`;
+    return `<div class="pcard" data-n="${pkey(c)}"><div class="n">${c.name} <span style="font-weight:400;color:var(--sub)"><span style="white-space:nowrap">(${isB?(c.fieldpos||'타자'):c.pos} · <b style="color:${TC[c.team]}">${c.team}</b>)</span></span></div><div class="m">${c.tier}${dupeCount(c)?` · 겹치기 ${dupeCount(c)}/${DUPE_MAX}`:''}${status? ' · '+status:''}</div></div>`;
   }).join('');
   document.querySelectorAll('#trainList .pcard').forEach(el=>el.addEventListener('click', ()=>openTrainModal(el.dataset.n)));
 }
@@ -2707,7 +2707,7 @@ function openTrainModal(cardName){ // cardName = 카드 고유키(pkey)
   const abroadHtml = studyHTML(c, cardName, abroad);
 
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
-    <h3>${c.name}${dupeCount(c)?` <span style="font-size:12px; color:var(--gold)">겹치기 ${dupeCount(c)}/${DUPE_MAX} (전 능력치 +${dupeBonus(dupeCount(c))})</span>`:''}</h3>
+    <h3>${c.name} <span style="font-size:12px; font-weight:800; color:${TC[c.team]}">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</span>${dupeCount(c)?` <span style="font-size:12px; color:var(--gold)">겹치기 ${dupeCount(c)}/${DUPE_MAX} (전 능력치 +${dupeBonus(dupeCount(c))})</span>`:''}</h3>
     <div style="font-size:12px; color:var(--sub); margin-bottom:6px">${c.stats.map(([l,v])=>`${l} ${v+(cardBonusMap(cardName)[l]||0)}`).join(' · ')}</div>
     <h2 class="sec">스킬블록 장착 (3슬롯)</h2>
     <div>${slotsHtml}</div>
