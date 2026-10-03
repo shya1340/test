@@ -82,7 +82,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .costbar{display:flex; gap:8px; flex-wrap:wrap; background:var(--lightblue); border-radius:10px; padding:10px 12px; margin:14px 0; font-size:12px;}
 .costbar .item{display:flex; flex-direction:column; align-items:center; flex:1; min-width:70px;}
 .costbar .item b{font-size:16px; color:var(--navy);}
-.orderrow{display:flex; flex-direction:row; gap:8px; overflow-x:auto; padding-bottom:6px;}
+.orderrow{display:flex; flex-direction:row; gap:10px; overflow-x:auto; padding:8px 6px 10px;}
 .minicard{flex-shrink:0; width:78px; border-radius:10px; overflow:hidden; cursor:pointer; border:2px solid #eef1f6; background:#fafbfd; text-align:center; font-size:10px; position:relative;}
 .minicard.dragover{border-color:var(--gold); box-shadow:0 0 0 3px rgba(212,169,75,.35);}
 .minicard.filled{border-color:var(--tc);}
@@ -112,6 +112,14 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .navbtn{flex:1; text-align:center; padding:11px 0 9px; font-size:11.5px; color:var(--sub); font-weight:700; cursor:pointer;}
 .navbtn.active{color:var(--tc);}
 .navbtn{position:relative;}
+.dupb{position:absolute; top:3px; left:3px; z-index:3; background:rgba(10,21,48,.82); color:#ffe08a; font-size:10px; font-weight:900; padding:1px 5px; border-radius:6px; line-height:1.3; text-shadow:none;}
+.dupb.max{background:linear-gradient(135deg,#d4a94b,#fff1b8,#d4a94b); color:#5a3a00;}
+.dup1{box-shadow:0 0 8px 2px rgba(190,205,225,1) !important;}
+.dup2{box-shadow:0 0 9px 2px rgba(80,160,255,.85) !important;}
+.dup3{box-shadow:0 0 12px 3px rgba(170,90,255,.85) !important;}
+.dup4{animation:dupMax 1.8s ease-in-out infinite;}
+@keyframes dupMax{0%,100%{box-shadow:0 0 10px 2px rgba(212,169,75,.7)}50%{box-shadow:0 0 22px 6px rgba(255,215,110,1)}}
+.minicard{overflow:visible !important;} .minicard .av{border-radius:8px 8px 0 0; position:relative;}
 @keyframes gFlip{0%{opacity:0; transform:perspective(600px) rotateY(80deg) scale(.9)}100%{opacity:1; transform:none}}
 @keyframes gGlowL{0%,100%{box-shadow:0 0 0 rgba(212,169,75,0)}50%{box-shadow:0 0 22px 4px rgba(212,169,75,.85)}}
 @keyframes gGlowA{0%,100%{box-shadow:0 0 0 rgba(139,63,212,0)}50%{box-shadow:0 0 18px 3px rgba(139,63,212,.75)}}
@@ -751,7 +759,7 @@ function finishOnboarding(t, pickedB, pickedP){
       <div style="font-size:12px; color:var(--sub); margin-bottom:8px">뽑기권 30장을 모두 사용해 초반 로스터를 채웠어요</div>
       <div class="grid">${chunk.map(c=>{
         const isB = c.pos==='타자';
-        return `<div class="card ${tbg(c.team,'d')}" style="background-color:${TC[c.team]}; border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}">${c.rarity}</div><div class="name">${c.name}</div></div><div class="body2" style="font-size:11px; font-weight:800">${isB?(c.fieldpos||'타자'):c.pos} · ${c.team} · ★${c.cost}</div></div>`;
+        return `<div class="card ${tbg(c.team,'d')}" style="background-color:${TC[c.team]}; border:2px solid ${rc[c.rarity]}"><div class="band"><div class="tier" style="background:${rc[c.rarity]}">${c.rarity}</div><div class="name">${c.name}${yrTag(c)}</div></div><div class="body2" style="font-size:11px; font-weight:800">${isB?(c.fieldpos||'타자'):c.pos} · ${c.team} · ★${c.cost}</div></div>`;
       }).join('')}</div>
       <button class="btn" style="margin-top:14px; width:100%" id="onboardNext">${idx+6<30?'다음':'게임 시작하기'}</button>
     `;
@@ -777,7 +785,7 @@ function triggerOnboarding(t){
   function miniPick(c, sel){
     const isSel = sel && sel.name===c.name;
     return `<div class="minicard ${isSel?'filled':''}" data-pk="${pkey(c)}" style="${isSel?'outline:2px solid var(--gold)':''}"><div class="av ${tbg(c.team,'s')}" style="background-color:${TC[c.team]}"></div>
-      <div class="info"><div class="nm">${c.name}</div><div class="ps" style="font-weight:800; color:var(--navy)">${c.pos==='타자'?c.fieldpos:c.pos} · <span style="color:${TC[c.team]}">${c.team}</span></div><div class="cst">★${c.cost}</div></div></div>`;
+      <div class="info"><div class="nm">${c.name}${yrTag(c)}</div><div class="ps" style="font-weight:800; color:var(--navy)">${c.pos==='타자'?c.fieldpos:c.pos} · <span style="color:${TC[c.team]}">${c.team}</span></div><div class="cst">★${c.cost}</div></div></div>`;
   }
   function draw(){
     document.getElementById('modalBody').innerHTML = `
@@ -1938,7 +1946,11 @@ function staggerReveal(){
 }
 
 // ===== 연도 표시 (2026 시즌 카드 대비) =====
-function yrTag(c){ return c && c.year && c.year!==2025 ? ` <span style="font-size:9px; font-weight:800; background:#0a2f6b; color:#fff; border-radius:4px; padding:0 4px">${String(c.year).slice(2)}</span>` : ''; }
+function yrTag(c){ if(!c) return ''; const y = c.year || 2025; return ` <span style="font-size:9px; font-weight:800; background:#0a2f6b; color:#fff; border-radius:4px; padding:0 3px; vertical-align:1px">${String(y).slice(2)}'</span>`; }
+// 겹치기 단계: 배지(+N) + 단계별 빛
+function dupLv(c){ const n = (typeof dupeCount==='function') ? dupeCount(c) : 0; return Math.max(0, Math.min(DUPE_MAX, n)); }
+function dupCls(c){ const n = dupLv(c); return n ? ` dup${n>=10?4:n>=7?3:n>=4?2:1}` : ''; }
+function dupBadge(c, big){ const n = dupLv(c); return n ? `<span class="dupb${n>=10?' max':''}" style="${big?'top:34px; left:10px; font-size:13px; padding:2px 8px':''}">+${n}${n>=10?' MAX':''}</span>` : ''; }
 
 // GitHub Pages에서만 앱 설치용 서비스워커 등록
 try{ if('serviceWorker' in navigator && /github\.io$/.test(location.hostname)) navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){}
@@ -2267,7 +2279,7 @@ function posAbbr(fp){
 function batterMiniCard(c, extraAttrs){
   if(!c) return `<div class="minicard empty" ${extraAttrs||''}><div class="av">?</div><div class="info"><div class="nm">비어있음</div></div></div>`;
   const other = c.team!==team;
-  return `<div class="minicard filled" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av ${tbg(c.team,'s')}" style="background-color:${TC[c.team]}"></div>
+  return `<div class="minicard filled${dupCls(c)}" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av ${tbg(c.team,'s')}" style="background-color:${TC[c.team]}">${dupBadge(c)}</div>
     <div class="info"><div class="nm">${c.name}${yrTag(c)}</div><div class="ps">${posAbbr(c.fieldpos)} · <span style="color:${TC[c.team]}; font-weight:800">${c.team}</span></div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
 }
 function renderCostBar(){
@@ -2481,7 +2493,7 @@ function currentPitcherStaff(){
 function pitcherMiniCard(c, extraAttrs){
   if(!c) return `<div class="minicard empty" ${extraAttrs||''}><div class="av">?</div><div class="info"><div class="nm">비어있음</div></div></div>`;
   const other = c.team!==team;
-  return `<div class="minicard filled" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av ${tbg(c.team,'s')}" style="background-color:${TC[c.team]}"></div>
+  return `<div class="minicard filled${dupCls(c)}" data-flipname="${pkey(c)}" ${extraAttrs||''}><div class="av ${tbg(c.team,'s')}" style="background-color:${TC[c.team]}">${dupBadge(c)}</div>
     <div class="info"><div class="nm">${c.name}${yrTag(c)}</div><div class="ps">${c.pos} · <span style="color:${TC[c.team]}; font-weight:800">${c.team}</span></div><div class="cst">★${c.cost} ${cardStatusHTML(c)}</div></div></div>`;
 }
 function assignPitcherToSlot(c, cat, i){
@@ -2815,7 +2827,7 @@ function renderTraining(){ setTimeout(updateBadges,0);
     const abroad = loadAbroad()[pkey(c)];
     const dn = abroad && abroad.dest ? ((STUDY_DESTS.find(x=>x.id===abroad.dest)||{}).name||'') + ' ' : '';
     const status = abroad ? dn + (new Date(abroad.endsAt) <= new Date() ? '유학 완료!' : fmtRemain(new Date(abroad.endsAt)-new Date())) : '';
-    return `<div class="pcard" data-n="${pkey(c)}"><div class="n">${c.name} <span style="font-weight:400;color:var(--sub)"><span style="white-space:nowrap">(${isB?(c.fieldpos||'타자'):c.pos} · <b style="color:${TC[c.team]}">${c.team}</b>)</span></span></div><div class="m">${c.tier}${dupeCount(c)?` · 겹치기 ${dupeCount(c)}/${DUPE_MAX}`:''}${status? ' · '+status:''}</div></div>`;
+    return `<div class="pcard${dupCls(c)}" data-n="${pkey(c)}" style="position:relative">${dupBadge(c).replace('<span class=','<span style="left:auto; right:6px; top:6px" class=')}<div class="n">${c.name}${yrTag(c)} <span style="font-weight:400;color:var(--sub)"><span style="white-space:nowrap">(${isB?(c.fieldpos||'타자'):c.pos} · <b style="color:${TC[c.team]}">${c.team}</b>)</span></span></div><div class="m">${c.tier}${dupeCount(c)?` · 겹치기 ${dupeCount(c)}/${DUPE_MAX}`:''}${status? ' · '+status:''}</div></div>`;
   }).join('');
   document.querySelectorAll('#trainList .pcard').forEach(el=>el.addEventListener('click', ()=>openTrainModal(el.dataset.n)));
 }
@@ -2841,7 +2853,7 @@ function openTrainModal(cardName){ // cardName = 카드 고유키(pkey)
   const abroadHtml = studyHTML(c, cardName, abroad);
 
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
-    <h3>${c.name} <span style="font-size:12px; font-weight:800; color:${TC[c.team]}">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</span>${dupeCount(c)?` <span style="font-size:12px; color:var(--gold)">겹치기 ${dupeCount(c)}/${DUPE_MAX} (전 능력치 +${dupeBonus(dupeCount(c))})</span>`:''}</h3>
+    <h3>${c.name}${yrTag(c)} <span style="font-size:12px; font-weight:800; color:${TC[c.team]}">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</span>${dupeCount(c)?` <span style="font-size:12px; color:var(--gold)">겹치기 ${dupeCount(c)}/${DUPE_MAX} (전 능력치 +${dupeBonus(dupeCount(c))})</span>`:''}</h3>
     <div style="font-size:12px; color:var(--sub); margin-bottom:6px">${c.stats.map(([l,v])=>`${l} ${v+(cardBonusMap(cardName)[l]||0)}`).join(' · ')}</div>
     <h2 class="sec">스킬블록 장착 (3슬롯)</h2>
     <div>${slotsHtml}</div>
@@ -3007,16 +3019,16 @@ function cardFrontHTML(c){
   const isB = c.pos==='타자';
   const posLabel = isB ? (c.fieldpos||'타자') : c.pos;
   const corners = c.rarity==='레전드' ? `<span class="corner" style="top:6px; left:6px">✦</span><span class="corner" style="bottom:6px; right:6px">✦</span>` : (c.rarity==='에이스' ? `<span class="corner" style="top:6px; left:6px">✧</span>` : '');
-  return `<div class="flipcard rarity-${c.rarity}" style="background:${TC[c.team]}">
+  return `<div class="flipcard rarity-${c.rarity}${dupCls(c)}" style="background:${TC[c.team]}">
     <div class="fav ${tbg(c.team,'p')}" style="background-color:${TC[c.team]}">
       <div class="mascot-bg">${TEAM_MASCOT[c.team]||''}</div>
       ${corners}
       <div class="fbanner" style="background:${RARITY_COLOR[c.rarity]}">${c.rarity}</div>
-      <div class="fnum">${c.overall}</div>
+      <div class="fnum">${c.overall}</div>${dupBadge(c, true)}
       
     </div>
     <div class="fbody">
-      <div class="fname">${c.name}</div>
+      <div class="fname">${c.name}${yrTag(c)}</div>
       <div class="fteam">${c.team} · ${posLabel} · ${c.tier} · ${c.year||2025}시즌</div>
       ${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%; background:${RARITY_COLOR[c.rarity]}"></div></div><div class="val" style="color:var(--ink)">${v}</div></div>`).join('')}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
@@ -3090,7 +3102,7 @@ function cardResultHTML(c, r){
   return `<div class="gres gres-${c.rarity==='레전드'?'L':c.rarity==='에이스'?'A':'N'}" style="background:${TC[c.team]}; border-radius:12px; overflow:hidden; color:#fff; margin-bottom:8px; position:relative">${big?`<div class="gres-tag">${c.rarity==='레전드'?'★ LEGEND ★':'✦ ACE ✦'}</div>`:''}
     <div class="${tbg(c.team,'d')}" style="padding:12px; background-color:${TC[c.team]}">
     <div style="font-size:10px; font-weight:800; background:${rc}; display:inline-block; padding:2px 8px; border-radius:8px">${c.rarity}</div>
-    <div style="display:flex; gap:10px; align-items:center"><div><div style="font-size:19px; font-weight:800; margin-top:4px">${c.name}</div>
+    <div style="display:flex; gap:10px; align-items:center"><div><div style="font-size:19px; font-weight:800; margin-top:4px">${c.name}${yrTag(c)}</div>
     <div style="font-size:11px; opacity:.85">${c.team}</div>${r!==undefined?addResultBadge(r):''}</div></div></div>
     <div style="padding:10px 12px; background:rgba(255,255,255,.08); font-size:11px">${c.stats.map(([l,v])=>`${l} ${v}`).join(' · ')}</div>
     <div style="padding:8px 12px 12px; background:rgba(255,255,255,.08); font-size:12px; color:#d4a94b; border-top:1px solid rgba(255,255,255,.1)">COST ${starsHTML(c.cost)}</div>
@@ -3113,7 +3125,7 @@ function showTeamDex(t){
   const items = list.map(c=>{
     const has = owned.has(pkey(c)), dn = has ? dupeCount(c) : 0;
     const posLbl = c.pos==='타자' ? (c.fieldpos||'타자') : c.pos;
-    return `<div class="card ${tbg(c.team,'d')}" data-flipname="${pkey(c)}" style="background-color:${TC[c.team]}; border:2px solid ${rc[c.rarity]}; ${has?'':'filter:grayscale(1); opacity:.55;'}"><div class="band" style="display:flex; gap:6px; align-items:center"><div style="min-width:0"><div class="tier" style="background:${rc[c.rarity]}; color:#fff">${c.rarity}</div><div class="name">${c.name}</div>
+    return `<div class="card ${tbg(c.team,'d')}${has?dupCls(c):''}" data-flipname="${pkey(c)}" style="position:relative; background-color:${TC[c.team]}; border:2px solid ${rc[c.rarity]}; ${has?'':'filter:grayscale(1); opacity:.55;'}"><div class="band" style="display:flex; gap:6px; align-items:center"><div style="min-width:0"><div class="tier" style="background:${rc[c.rarity]}; color:#fff">${c.rarity}</div><div class="name">${c.name}${yrTag(c)}</div>
       <div style="font-size:10px; opacity:.85">${c.team} · ${posLbl}${has ? ` · <b style="color:#ffe08a">보유${dn?` +${dn}`:''}</b>` : ' · 미보유'}</div></div></div>
     <div class="body2">${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%"></div></div>${v}</div>`).join('')}
     <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.15); color:var(--gold); font-size:10px">COST ${starsHTML(c.cost)}</div></div></div>`;
