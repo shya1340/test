@@ -1135,7 +1135,10 @@ function slotIndexToDate(seasonStart, gameIdx){
   return d;
 }
 let NO_TALLY = false; // true인 동안(시범경기) 선수 시즌 기록 집계 안 함
-const PRESEASON_REWARD = {win:75, tie:50, loss:30}; // 정규시즌(150/100/60)의 절반
+const PRESEASON_REWARD = {win:75, tie:50, loss:50}; // 정규시즌(150/100/100)의 절반
+const GAME_REWARD = {win:150, tie:100, loss:100};
+// 활약 보너스(승패 무관): 내 팀 안타 1개당 1냥, 홈런 5냥, 탈삼진 1냥
+function perfBonus(r){ const b = r && r.box; if(!b) return 0; const h = (b.bat||[]).reduce((s,x)=>s+(x.h||0),0), hr = (b.bat||[]).reduce((s,x)=>s+(x.hr||0),0), so = ((b.pit||{})[b.side]||[]).reduce((s,x)=>s+(x.so||0),0); return h*1 + hr*5 + so*1; }
 // 시범경기: 일요일이 아닌 날 시즌이 만들어지면, 다음 일요일 07시 개막 전까지 매시 정각(07~23시) 1경기
 function buildPreseason(now, seasonStart){
   const pairs = [];
@@ -1258,7 +1261,7 @@ function catchUpSeason(season){
     if(g.home===team || g.away===team){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
-      addCurrency(myScore>oppScore?150:(myScore===oppScore?100:60));
+      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r));
     }
     changed=true;
   }
@@ -1532,20 +1535,22 @@ async function renderRecordsPane(){
 }
 // ===== 출석·일일 미션 =====
 const DAILY_MISSIONS = [ {id:'w5', label:'오늘 내 팀 5승', reward:1000, need:5, kind:'win'}, {id:'w10', label:'오늘 내 팀 10승', reward:2000, need:10, kind:'win'}, {id:'pull', label:'카드 또는 블록 뽑기 1회', reward:300, need:1, kind:'pull'} ];
-function loadDaily(){ let d = {}; try{ d = JSON.parse(localStorage.getItem('sn_daily_'+ns())||'{}'); }catch(e){} const today = todayDayKey(); if(d.date!==today){ d = {date:today, att:false, claimed:{}, pulls:0, streak:d.streak||0, last:d.last||''}; } return d; }
+const DAILY_RESET_HOUR = 7; // 일일 미션·출석은 매일 오전 7시에 초기화
+function missionDayKey(){ return dayKey(new Date(Date.now() - DAILY_RESET_HOUR*3600000)); }
+function loadDaily(){ let d = {}; try{ d = JSON.parse(localStorage.getItem('sn_daily_'+ns())||'{}'); }catch(e){} const today = missionDayKey(); if(d.date!==today){ d = {date:today, att:false, claimed:{}, pulls:0, streak:d.streak||0, last:d.last||''}; } return d; }
 function saveDaily(d){ try{ localStorage.setItem('sn_daily_'+ns(), JSON.stringify(d)); }catch(e){} schedulePush(); }
 function dailyBump(){ const d = loadDaily(); d.pulls = (d.pulls||0)+1; saveDaily(d); }
 function todayWins(){
-  if(!LAST_SEASON) return 0; const list = myScheduleByDay(LAST_SEASON)[todayDayKey()] || [];
+  if(!LAST_SEASON) return 0; const list = myScheduleByDay(LAST_SEASON)[missionDayKey()] || [];
   return list.filter(o=>{ const m = myResult(o); return m && m.res==='승'; }).length;
 }
 function renderDaily(){
   const box = document.getElementById('dailyBox'); if(!box) return;
   const d = loadDaily(), wins = todayWins();
-  const y = new Date(); y.setDate(y.getDate()-1);
+  const y = new Date(Date.now() - DAILY_RESET_HOUR*3600000); y.setDate(y.getDate()-1);
   const nextStreak = d.last===dayKey(y) ? (d.streak||0)+1 : 1;
   const prog = m => m.kind==='win' ? wins : (d.pulls||0);
-  box.innerHTML = `<div class="sched-row"><div><b>출석 체크</b><div class="result-line">500냥 · 7일 연속마다 뽑기권 3장 · 연속 ${d.att ? d.streak : (d.streak||0)}일</div></div>${d.att ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>' : `<button class="btn" id="attBtn" style="padding:7px 14px">받기</button>`}</div>
+  box.innerHTML = `<div class="sched-row"><div><b>출석 체크</b><div class="result-line">500냥 · 7일 연속마다 뽑기권 3장 · 매일 오전 7시 초기화 · 연속 ${d.att ? d.streak : (d.streak||0)}일</div></div>${d.att ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>' : `<button class="btn" id="attBtn" style="padding:7px 14px">받기</button>`}</div>
     ${DAILY_MISSIONS.map(m=>{ const p = Math.min(m.need, prog(m)), done = p>=m.need, got = d.claimed && d.claimed[m.id];
       return `<div class="sched-row"><div><b>${m.label}</b><div class="result-line">${p}/${m.need} · 보상 ${m.reward.toLocaleString()}냥</div></div>${got ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>' : done ? `<button class="btn" data-mission="${m.id}" style="padding:7px 14px">받기</button>` : '<span style="color:#b7c0d1; font-size:12px">진행 중</span>'}</div>`; }).join('')}`;
   const ab = document.getElementById('attBtn');
@@ -1574,6 +1579,7 @@ function cardStatusHTML(c){
 function shade(hex, amt){ const n = parseInt(hex.slice(1),16); let r=(n>>16)+amt, g=((n>>8)&255)+amt, b=(n&255)+amt; r=Math.max(0,Math.min(255,r)); g=Math.max(0,Math.min(255,g)); b=Math.max(0,Math.min(255,b)); return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1); }
 
 // ===== AI 밸런스: 내 경기 라인업(타자9·투수11)의 전체 능력치 평균을 기준으로 AI 팀을 따라오게 함 =====
+const AI_MAX_DOWN = 25;
 const AI_CATCHUP = 0.7; // 차이의 70%만 따라옴 → 내 팀이 강해지면 여전히 유리하지만 압도하지는 않음
 let BAL_CACHE = {t:0, d:{bat:0, pit:0}}, AI_BASE = null;
 function avgAllStats(cards){ let s=0, n=0; cards.filter(Boolean).forEach(c=>c.stats.forEach(([l,v])=>{ s+=v; n++; })); return n ? s/n : 0; }
@@ -1589,11 +1595,12 @@ function aiBalance(){
   try{
     const lu = lineupFor(team), st = staffFor(team), b = aiBase();
     const myBat = avgAllStats(lu), myPit = avgAllStats([...st.starters, ...st.middle, ...st.setup, ...st.closer]);
-    d = {bat: Math.max(0, (myBat - b.bat) * AI_CATCHUP), pit: Math.max(0, (myPit - b.pit) * AI_CATCHUP), myBat, myPit, aiBat: b.bat, aiPit: b.pit};
+    const cl = v => Math.max(-AI_MAX_DOWN, v); // 양방향: 내 팀이 약하면 AI도 내 수준 쪽으로 내려옴(최대 -25)
+    d = {bat: cl((myBat - b.bat) * AI_CATCHUP), pit: cl((myPit - b.pit) * AI_CATCHUP), myBat, myPit, aiBat: b.bat, aiPit: b.pit};
   }catch(e){}
   BAL_CACHE = {t: now, d}; return d;
 }
-function addAllStats(c, k){ if(!c || !k) return c; const r = Math.round(k); return r ? {...c, stats: c.stats.map(([l,v])=>[l, v + r])} : c; }
+function addAllStats(c, k){ if(!c || !k) return c; const r = Math.round(k); return r ? {...c, stats: c.stats.map(([l,v])=>[l, Math.max(1, v + r)])} : c; }
 // ===== 시즌 종료 보상 =====
 const RANK_REWARD = [5000, 3000, 2000, 1000, 1000, 500, 500, 500, 500, 500];
 function grantSeasonRewards(oldSeason, entry){
@@ -1655,7 +1662,7 @@ const HELP_SECTIONS = [
   ['컨디션·피로','선수마다 매일 컨디션(⇈최상 ~ ⇊최악, ±6%)이 바뀌어요. 불펜 투수가 연속 등판하면 다음 경기에 −8%씩 지쳐요. 선발은 5명이 돌아가며 던져요.'],
   ['성장','훈련 탭에서 스킬블록(능력치+) 장착, 유학(12일, 성공 70%)으로 키워요. 유학지는 한국시리즈 우승·정규 1위 횟수로 열려요. 능력치는 상한이 없고, 수비·구종 등급은 D~EX로 표시돼요.'],
   ['AI 밸런스','상대 AI 팀은 내 경기 라인업의 평균 능력치를 일부(차이의 70%) 따라와요. 강해질수록 유리하지만 일방적이지 않게 맞춰져요.'],
-  ['보상','경기 승패 화폐, 출석·일일 미션, 한국시리즈 우승(뽑기권 10장), 시즌 종료 순위 보상과 내 선수 수상 보너스가 있어요.']
+  ['보상','경기마다 승 150 · 무 100 · 패 100냥 + 활약 보너스(내 팀 안타 1 · 홈런 5 · 탈삼진 1냥, 시범경기는 절반). 출석·일일 미션(매일 오전 7시 초기화), 한국시리즈 우승(뽑기권 10장), 시즌 종료 순위 보상과 내 선수 수상 보너스도 있어요. AI 팀은 내 라인업 능력치 평균에 맞춰 강해지거나 약해져요(차이의 70%).']
 ];
 function openHelp(){
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>게임 도움말</h3>${HELP_SECTIONS.map(([t,d])=>`<h2 class="sec">${t}</h2><div style="font-size:12.5px; line-height:1.6">${d}</div>`).join('')}`);
@@ -1886,7 +1893,7 @@ async function catchUpSeasonShared(){
     if(g.home===team || g.away===team){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
-      addCurrency(myScore>oppScore?150:(myScore===oppScore?100:60));
+      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r));
     }
     changed=true;
   }
@@ -1966,7 +1973,7 @@ function simSeriesGame(home, away){
   if(home===team || away===team){
     const myScore = home===team? r.scoreHome : r.scoreAway;
     const oppScore = home===team? r.scoreAway : r.scoreHome;
-    addCurrency(myScore>oppScore?300:120);
+    addCurrency((myScore>oppScore?300:150) + perfBonus(r));
   }
   return r;
 }
