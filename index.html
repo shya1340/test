@@ -112,6 +112,8 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .navbtn{flex:1; text-align:center; padding:11px 0 9px; font-size:11.5px; color:var(--sub); font-weight:700; cursor:pointer;}
 .navbtn.active{color:var(--tc);}
 .navbtn{position:relative;}
+.minicard,.card{-webkit-touch-callout:none; -webkit-user-select:none; user-select:none;}
+.infob{position:absolute; top:3px; right:3px; z-index:4; width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); color:#0a2f6b; font:italic 900 12px/18px Georgia,serif; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,.35); cursor:pointer;}
 .dupb{position:absolute; top:3px; left:3px; z-index:3; background:rgba(10,21,48,.82); color:#ffe08a; font-size:10px; font-weight:900; padding:1px 5px; border-radius:6px; line-height:1.3; text-shadow:none;}
 .dupb.max{background:linear-gradient(135deg,#d4a94b,#fff1b8,#d4a94b); color:#5a3a00;}
 .dup1{box-shadow:0 0 8px 2px rgba(190,205,225,1) !important;}
@@ -179,7 +181,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <button class="btn ghost" id="goDex">카드 도감</button>
 </div>
 <div id="summaryBox"></div>
-<h2 class="sec">오늘의 미션</h2>
+<h2 class="sec">미션</h2>
 <div id="dailyBox"></div>
 <h2 class="sec">현재 타순</h2>
 <div id="homeLineupPreview" class="result-line"></div>
@@ -226,7 +228,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div style="font-size:11px; color:var(--sub); margin-bottom:6px; line-height:1.6">카드 표시: 컨디션 ⇈최상 ↑좋음 →보통 ↓나쁨 ⇊최악(하루 단위, ±6%까지) · 🔒 시즌 중 선발 투수 교체 잠금(24시간) · 피로n 불펜 연투(다음 등판 −8%×n)</div>
 </div>
 <div id="lu-bat">
-<h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 드래그로 배치 · 우클릭하면 카드가 커져요)</h2>
+<h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 드래그로 배치 · 길게 누르거나 ⓘ·우클릭하면 카드 상세)</h2>
 <div class="slots orderrow" id="slots"></div>
 <button class="btn ghost" id="resetBtn" style="margin-top:10px">초기화</button> <button class="btn ghost" id="autoPosBtn" style="margin-top:10px">포지션 자동 배치</button>
 <div style="font-size:11px; color:var(--sub); margin-top:6px">타순마다 수비 포지션을 고를 수 있어요. 2025 수비 기록이 없는 포지션은 전 능력치 -10%(포수 자리는 -20%), 30이닝 미만은 -5%, 지명타자는 패널티 없음.</div>
@@ -238,7 +240,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div class="pool orderrow" id="pool"></div>
 </div>
 <div id="lu-pit" style="display:none">
-<h2 class="sec">투수진 (슬롯을 먼저 클릭 → 아래 명단에서 선수 클릭 · 우클릭하면 카드가 커져요)</h2>
+<h2 class="sec">투수진 (슬롯을 먼저 클릭 → 아래 명단에서 선수 클릭 · 길게 누르거나 ⓘ·우클릭하면 카드 상세)</h2>
 <div id="pitcherSlots"></div>
 <button class="btn ghost" id="resetPitcherBtn" style="margin-top:10px">투수진 초기화</button>
 <h2 class="sec" id="pitcherPoolTitle">투수 대기 명단</h2>
@@ -370,7 +372,7 @@ function collectSyncPayload(){
     PERSONAL_TEAM_KEYS.forEach(pref=>{ const v = localStorage.getItem(pref+nick+'_'+t); if(v!==null) td[pref]=v; });
     if(Object.keys(td).length) teamsData[t]=td;
   });
-  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, updatedAt: new Date().toISOString() };
+  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, missions: localStorage.getItem('sn_missions_'+nick)||null, attstreak: localStorage.getItem('sn_attstreak_'+nick)||null, updatedAt: new Date().toISOString() };
 }
 // ----- 기기 간 동기화 보호: 빈 새 기기가 다른 기기의 진행을 덮어쓰지 않게 -----
 function localSummary(nick){
@@ -431,6 +433,8 @@ function applySyncPayloadForNick(nick, data){
   if(data.onboarded) localStorage.setItem('sn_onboarded_'+nick, data.onboarded);
   if(data.titles) localStorage.setItem('sn_titles_'+nick, data.titles);
   if(data.dupes) localStorage.setItem('sn_dupes_'+nick, data.dupes);
+  if(data.missions) localStorage.setItem('sn_missions_'+nick, data.missions);
+  if(data.attstreak) localStorage.setItem('sn_attstreak_'+nick, data.attstreak);
   if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team_'+nick, team); }
   if(data.teamlock) { localStorage.setItem('sn_teamlock_'+nick, data.teamlock); localStorage.setItem('sn_team_'+nick, data.teamlock); team = data.teamlock; }
 }
@@ -1214,7 +1218,7 @@ function catchUpPreseason(season){
       ps.results[i] = r;
       if(g.home===team || g.away===team){
         const my = g.home===team? r.scoreHome : r.scoreAway, opp = g.home===team? r.scoreAway : r.scoreHome;
-        addCurrency(my>opp?PRESEASON_REWARD.win:(my===opp?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss));
+        addCurrency(my>opp?PRESEASON_REWARD.win:(my===opp?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss)); msGame(r, {my, op:opp}, gameDayKey(ps.dates[i]));
       }
     }
   } finally { NO_TALLY = false; }
@@ -1305,7 +1309,7 @@ function catchUpSeason(season){
     if(g.home===team || g.away===team){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
-      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r));
+      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, gameDayKey(slotIndexToDate(season.seasonStart, i)));
     }
     changed=true;
   }
@@ -1578,29 +1582,115 @@ async function renderRecordsPane(){
       return `<div style="border:1px solid #eef1f6; border-radius:10px; padding:8px 10px; margin-bottom:8px"><div style="font-size:12px; font-weight:800">${st.getMonth()+1}/${st.getDate()} 시즌 · 🏆 ${TC[ch]?teamChip(ch):ch} · 정규 1위 ${TC[pn]?teamChip(pn):pn}${ch===team?' <span style="color:var(--gold)">(내 팀 우승!)</span>':''}</div>${e.my && e.my.team===team ? `<div style="font-size:11.5px; color:var(--sub); margin-top:3px">내 팀 ${e.my.rank}위 · ${e.my.w}승 ${e.my.t}무 ${e.my.l}패</div>` : ''}<div style="margin-top:6px">${e.awards ? awardsHTML(e.awards) : '<div class="result-line">시상 기록 없음(이전 버전 시즌)</div>'}</div></div>`; }).join('') : '<div class="result-line">아직 끝난 시즌이 없어요. 시즌이 끝나면 우승팀과 시상 기록이 여기에 쌓여요.</div>'}`;
 }
 // ===== 출석·일일 미션 =====
-const DAILY_MISSIONS = [ {id:'w5', label:'오늘 내 팀 5승', reward:1000, need:5, kind:'win'}, {id:'w10', label:'오늘 내 팀 10승', reward:2000, need:10, kind:'win'}, {id:'pull', label:'카드 또는 블록 뽑기 1회', reward:300, need:1, kind:'pull'} ];
 const DAILY_RESET_HOUR = 7; // 일일 미션·출석은 매일 오전 7시에 초기화
 function missionDayKey(){ return dayKey(new Date(Date.now() - DAILY_RESET_HOUR*3600000)); }
-function loadDaily(){ let d = {}; try{ d = JSON.parse(localStorage.getItem('sn_daily_'+ns())||'{}'); }catch(e){} const today = missionDayKey(); if(d.date!==today){ d = {date:today, att:false, claimed:{}, pulls:0, streak:d.streak||0, last:d.last||''}; } return d; }
-function saveDaily(d){ try{ localStorage.setItem('sn_daily_'+ns(), JSON.stringify(d)); }catch(e){} schedulePush(); }
-function dailyBump(){ const d = loadDaily(); d.pulls = (d.pulls||0)+1; saveDaily(d); }
-function todayWins(){
-  if(!LAST_SEASON) return 0; const list = myScheduleByDay(LAST_SEASON)[missionDayKey()] || [];
-  return list.filter(o=>{ const m = myResult(o); return m && m.res==='승'; }).length;
-}
+// ===== 미션: 일일 · 주간 · 월간 =====
+// 진행도는 경기를 계산할 때·뽑기·유학·출석 때 누적(기간이 바뀌면 자동 초기화, 매일 오전 7시 기준)
+const MISSIONS = {
+  d: [ {id:'d_att',  label:'출석 체크',            kind:'att',   need:1,  reward:500},
+       {id:'d_win3', label:'내 팀 5승',             kind:'win',   need:5,  reward:600},
+       {id:'d_win6', label:'내 팀 10승',            kind:'win',   need:10, reward:1200},
+       {id:'d_hit',  label:'내 팀 안타 120개',      kind:'hit',   need:120,reward:400},
+       {id:'d_pull', label:'카드 또는 블록 뽑기 1회', kind:'pull',  need:1,  reward:300} ],
+  w: [ {id:'w_att',  label:'5일 출석',              kind:'att',   need:5,  reward:2000, tickets:1},
+       {id:'w_win',  label:'내 팀 50승',            kind:'win',   need:50, reward:4000},
+       {id:'w_hr',   label:'내 팀 홈런 120개',      kind:'hr',    need:120,reward:2000},
+       {id:'w_so',   label:'내 팀 탈삼진 600개',    kind:'so',    need:600,reward:2000},
+       {id:'w_pull', label:'뽑기 10회',             kind:'pull',  need:10, reward:1500},
+       {id:'w_ps',   label:'포스트시즌 진출',        kind:'ps',    need:1,  reward:3000} ],
+  m: [ {id:'m_att',  label:'20일 출석',             kind:'att',   need:20, reward:6000, tickets:5},
+       {id:'m_win',  label:'내 팀 200승',           kind:'win',   need:200,reward:10000, tickets:3},
+       {id:'m_study',label:'유학 보내기 5회',        kind:'study', need:5,  reward:5000},
+       {id:'m_pull', label:'뽑기 40회',             kind:'pull',  need:40, reward:5000},
+       {id:'m_ks',   label:'한국시리즈 우승 1회',    kind:'ks',    need:1,  reward:8000, tickets:5} ]
+};
+const MS_LABEL = {d:'일일', w:'주간', m:'월간'};
+function msDate(){ return new Date(Date.now() - DAILY_RESET_HOUR*3600000); }
+function msKeyOf(p, d){
+  if(p==='d') return dayKey(d);
+  if(p==='w'){ const s = new Date(d); s.setDate(s.getDate()-s.getDay()); return 'W'+dayKey(s); }
+  return 'M'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function msPeriodKey(p){ const d = msDate();
+  if(p==='d') return dayKey(d);
+  if(p==='w'){ const s = new Date(d); s.setDate(s.getDate()-s.getDay()); return 'W'+dayKey(s); } // 일요일 시작(시즌과 같음)
+  return 'M'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function msResetText(p){ const d = msDate(); let e;
+  if(p==='d'){ e = new Date(d); e.setDate(e.getDate()+1); }
+  else if(p==='w'){ e = new Date(d); e.setDate(e.getDate()-e.getDay()+7); }
+  else e = new Date(d.getFullYear(), d.getMonth()+1, 1);
+  e.setHours(DAILY_RESET_HOUR,0,0,0); return fmtRemain(e - new Date()) + ' 후 초기화'; }
+function loadMS(){ let o = {}; try{ o = JSON.parse(localStorage.getItem('sn_missions_'+ns())||'{}')||{}; }catch(e){}
+  for(const p of ['d','w','m']){ const k = msPeriodKey(p); if(!o[p] || o[p].k!==k) o[p] = {k, c:{}, got:{}}; }
+  return o; }
+function saveMS(o){ try{ localStorage.setItem('sn_missions_'+ns(), JSON.stringify(o)); }catch(e){} schedulePush(); }
+function msTally(kind, n){ if(!n) return; const o = loadMS(); for(const p of ['d','w','m']) o[p].c[kind] = (o[p].c[kind]||0) + n; saveMS(o); }
+// 내 경기 1건 결과를 미션에 반영
+function msGame(r, mine, dk){ try{
+  const b = r && r.box; const win = mine && mine.my > mine.op ? 1 : 0;
+  const o = loadMS();
+  const gd = dk ? new Date(dk+'T12:00:00') : msDate(); // 경기가 열린 날 기준으로 집계(접속 안 한 날 경기는 그날 몫)
+  const add = (k,n)=>{ if(n) for(const p of ['d','w','m']) if(msKeyOf(p, gd)===o[p].k) o[p].c[k] = (o[p].c[k]||0)+n; };
+  add('win', win);
+  if(b){ add('hit', (b.bat||[]).reduce((s,x)=>s+(x.h||0),0)); add('hr', (b.bat||[]).reduce((s,x)=>s+(x.hr||0),0)); add('so', ((b.pit||{})[b.side]||[]).reduce((s,x)=>s+(x.so||0),0)); }
+  saveMS(o);
+}catch(e){} }
+// 기존 dailyBump(뽑기 1회) 호환
+function dailyBump(){ msTally('pull', 1); }
+function msAttend(){ const o = loadMS(); if(o.d.c.att) return false;
+  // 연속 출석(7일마다 뽑기권 3장)은 기존 규칙 유지
+  let st = {}; try{ st = JSON.parse(localStorage.getItem('sn_attstreak_'+ns())||'{}'); }catch(e){}
+  const y = msDate(); y.setDate(y.getDate()-1);
+  st.n = st.last===dayKey(y) ? (st.n||0)+1 : 1; st.last = dayKey(msDate());
+  try{ localStorage.setItem('sn_attstreak_'+ns(), JSON.stringify(st)); }catch(e){}
+  for(const p of ['d','w','m']) o[p].c.att = (o[p].c.att||0)+1;
+  saveMS(o); return st.n; }
+let MS_TAB = 'd';
 function renderDaily(){
   const box = document.getElementById('dailyBox'); if(!box) return;
-  const d = loadDaily(), wins = todayWins();
-  const y = new Date(Date.now() - DAILY_RESET_HOUR*3600000); y.setDate(y.getDate()-1);
-  const nextStreak = d.last===dayKey(y) ? (d.streak||0)+1 : 1;
-  const prog = m => m.kind==='win' ? wins : (d.pulls||0);
-  box.innerHTML = `<div class="sched-row"><div><b>출석 체크</b><div class="result-line">500냥 · 7일 연속마다 뽑기권 3장 · 매일 오전 7시 초기화 · 연속 ${d.att ? d.streak : (d.streak||0)}일</div></div>${d.att ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>' : `<button class="btn" id="attBtn" style="padding:7px 14px">받기</button>`}</div>
-    ${DAILY_MISSIONS.map(m=>{ const p = Math.min(m.need, prog(m)), done = p>=m.need, got = d.claimed && d.claimed[m.id];
-      return `<div class="sched-row"><div><b>${m.label}</b><div class="result-line">${p}/${m.need} · 보상 ${m.reward.toLocaleString()}냥</div></div>${got ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>' : done ? `<button class="btn" data-mission="${m.id}" style="padding:7px 14px">받기</button>` : '<span style="color:#b7c0d1; font-size:12px">진행 중</span>'}</div>`; }).join('')}`;
-  const ab = document.getElementById('attBtn');
-  if(ab) ab.addEventListener('click', ()=>{ const d2 = loadDaily(); if(d2.att) return; d2.att = true; d2.streak = nextStreak; d2.last = d2.date; addCurrency(500); let msg = '출석 보상 500냥을 받았어요.'; if(d2.streak%7===0){ addTickets(3); msg += `\n${d2.streak}일 연속 출석! 뽑기권 3장 추가`; } saveDaily(d2); alert(msg); renderDaily(); });
-  box.querySelectorAll('[data-mission]').forEach(el=>el.addEventListener('click', ()=>{ const m = DAILY_MISSIONS.find(x=>x.id===el.dataset.mission), d2 = loadDaily(); d2.claimed = d2.claimed||{}; if(d2.claimed[m.id]) return; d2.claimed[m.id] = true; addCurrency(m.reward); saveDaily(d2); renderDaily(); }));
+  const o = loadMS();
+  const tabs = ['d','w','m'].map(p=>{ const ready = MISSIONS[p].filter(m=>(o[p].c[m.kind]||0)>=m.need && !o[p].got[m.id]).length;
+    return `<div class="ftab ${MS_TAB===p?'active':''}" data-mst="${p}" style="position:relative">${MS_LABEL[p]}${ready?` <span style="background:#e0312b; color:#fff; border-radius:8px; padding:0 5px; font-size:10px">${ready}</span>`:''}</div>`; }).join('');
+  const p = MS_TAB, P = o[p];
+  let st = {}; try{ st = JSON.parse(localStorage.getItem('sn_attstreak_'+ns())||'{}'); }catch(e){}
+  const rows = MISSIONS[p].map(m=>{
+    const cur = Math.min(m.need, P.c[m.kind]||0), done = cur>=m.need, got = P.got[m.id];
+    const rw = `${m.reward.toLocaleString()}냥${m.tickets?` + 뽑기권 ${m.tickets}장`:''}`;
+    const btn = got ? '<span style="color:var(--sub); font-size:12px">완료 ✓</span>'
+      : (m.kind==='att' && p==='d' && !done) ? `<button class="btn" data-msatt="1" style="padding:7px 14px">출석</button>`
+      : done ? `<button class="btn" data-msget="${m.id}" style="padding:7px 14px">받기</button>` : '<span style="color:#b7c0d1; font-size:12px">진행 중</span>';
+    return `<div class="sched-row"><div style="flex:1; min-width:0"><b>${m.label}</b>
+      <div style="height:5px; background:#eef1f6; border-radius:3px; margin:4px 0 2px; overflow:hidden"><div style="height:100%; width:${cur/m.need*100}%; background:var(--tc)"></div></div>
+      <div class="result-line">${cur}/${m.need} · 보상 ${rw}${m.id==='d_att'?` · 연속 ${st.n||0}일(7일마다 뽑기권 3장)`:''}</div></div>${btn}</div>`; }).join('');
+  box.innerHTML = `<div class="filtertabs" style="margin-bottom:4px">${tabs}</div><div style="font-size:11px; color:var(--sub); margin-bottom:4px">${MS_LABEL[p]} 미션 · ${msResetText(p)}</div>${rows}`;
+  box.querySelectorAll('[data-mst]').forEach(el=>el.addEventListener('click', ()=>{ MS_TAB = el.dataset.mst; renderDaily(); }));
+  const ab = box.querySelector('[data-msatt]');
+  if(ab) ab.addEventListener('click', ()=>{ const n = msAttend(); if(n===false) return; const o3 = loadMS(); o3.d.got.d_att = true; saveMS(o3); addCurrency(500); refreshCurrencyDisplay(); let msg = '출석 완료! 500냥을 받았어요.'; if(n%7===0){ addTickets(3); msg += `\n${n}일 연속 출석! 뽑기권 3장 지급`; } alert(msg); renderDaily(); });
+  box.querySelectorAll('[data-msget]').forEach(el=>el.addEventListener('click', ()=>{
+    const o2 = loadMS(); const m = MISSIONS[p].find(x=>x.id===el.dataset.msget); if(!m || o2[p].got[m.id] || (o2[p].c[m.kind]||0)<m.need) return;
+    o2[p].got[m.id] = true; saveMS(o2); addCurrency(m.reward); if(m.tickets) addTickets(m.tickets); refreshCurrencyDisplay && refreshCurrencyDisplay(); renderDaily(); updateBadges(); }));
 }
+
+// ===== 모바일: 길게 누르기(0.45초) 또는 ⓘ 버튼으로 카드 상세 =====
+let LP_BLOCK_UNTIL = 0;
+document.addEventListener('click', e=>{ if(Date.now() < LP_BLOCK_UNTIL){ e.stopPropagation(); e.preventDefault(); } }, true);
+function bindCardDetail(el){
+  if(el.dataset.lp) return; el.dataset.lp = '1';
+  const open = ()=>{ const c = CARDS.find(x=>pkey(x)===el.dataset.flipname); if(c) openFlipCard(c); };
+  let t = null, sx = 0, sy = 0;
+  el.addEventListener('touchstart', e=>{ const p = e.touches[0]; sx = p.clientX; sy = p.clientY; clearTimeout(t);
+    t = setTimeout(()=>{ t = null; LP_BLOCK_UNTIL = Date.now()+700; try{ navigator.vibrate && navigator.vibrate(20); }catch(_){} open(); }, 450); }, {passive:true});
+  el.addEventListener('touchmove', e=>{ const p = e.touches[0]; if(Math.abs(p.clientX-sx)>10 || Math.abs(p.clientY-sy)>10){ clearTimeout(t); t=null; } }, {passive:true});
+  el.addEventListener('touchend', ()=>{ clearTimeout(t); t=null; });
+  el.addEventListener('touchcancel', ()=>{ clearTimeout(t); t=null; });
+  if(el.classList.contains('minicard') && !el.querySelector('.infob')){
+    const b = document.createElement('span'); b.className = 'infob'; b.textContent = 'i'; b.title = '카드 상세';
+    b.addEventListener('click', e=>{ e.stopPropagation(); e.preventDefault(); open(); });
+    b.addEventListener('touchstart', e=>e.stopPropagation(), {passive:true});
+    (el.querySelector('.av') || el).appendChild(b);
+  }
+}
+
+(function(){ try{ const n = ns(); if(localStorage.getItem('sn_attstreak_'+n)) return; const d = JSON.parse(localStorage.getItem('sn_daily_'+n)||'null'); if(d && d.last) localStorage.setItem('sn_attstreak_'+n, JSON.stringify({n:d.streak||0, last:d.last})); }catch(e){} })();
 // ===== 감독 작전 UI =====
 function renderTactics(){
   const box = document.getElementById('tacticsBox'); if(!box) return;
@@ -1700,6 +1790,8 @@ function renderNotices(){ setTimeout(updateBadges,0);
 const HELP_SECTIONS = [
   ['수비·주루','내야 수비가 좋으면 병살이 늘고, 외야 수비가 좋으면 희생플라이·추가 진루가 줄고 홈 송구 보살이 나와요. 포수 수비가 좋으면 도루 성공률이 떨어져요. 발 빠른 주자는 한 베이스 더 가고 병살도 덜 당해요.'],
   ['유학 대성공','유학 성공 70% 중 10%는 대성공(명인)으로, 성공 수치의 1.5배를 받아요.'],
+  ['미션','홈 화면 미션은 일일·주간·월간 탭으로 나뉘어요. 매일 오전 7시 기준으로 초기화되고(주간은 일요일, 월간은 1일), 경기 기록은 그 경기가 열린 날 몫으로 집계돼요.'],
+  ['카드 상세 보기','PC는 우클릭, 휴대폰은 카드를 길게 누르거나(0.5초) 카드 오른쪽 위 ⓘ 버튼을 누르면 상세 카드가 열려요.'],
   ['편의 기능','라인업 탭 위쪽 버튼: ⚡추천 라인업(보유 카드로 가장 강한 타순·투수진 자동 편성), 💾프리셋(라인업 3개 저장·불러오기), ⚖카드 비교(두 카드 능력치 나란히 보기). 일정에서 내 경기 박스스코어를 열면 📻경기 중계를 다시 볼 수 있어요(이 기기 최근 30경기). 하단 탭의 빨간 숫자는 읽지 않은 알림·완료된 유학이에요.'],
   ['시즌 진행','한 시즌은 일주일이에요. 일~금 매시 정각(07~24시)에 10팀이 동시에 경기하고, 토요일은 포스트시즌(1~5위)이에요. 주중에 시작하면 일요일 개막 전까지 시범경기(기록·순위 미반영)를 해요. 접속하지 않아도 시간에 맞춰 자동 진행돼요.'],
   ['카드와 코스트','선수 카드는 실제 기록을 바탕으로 능력치·코스트(1~10)·등급(일반·레어·에이스·레전드)이 정해져요. 같은 카드를 또 뽑으면 겹치기(최대 10회, 1회마다 전 능력치 +1), 다 채우면 코스트×100냥으로 돌려받아요.'],
@@ -2015,7 +2107,7 @@ async function catchUpSeasonShared(){
     if(g.home===team || g.away===team){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
-      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r));
+      addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, gameDayKey(slotIndexToDate(season.seasonStart, i)));
     }
     changed=true;
   }
@@ -2095,7 +2187,7 @@ function simSeriesGame(home, away){
   if(home===team || away===team){
     const myScore = home===team? r.scoreHome : r.scoreAway;
     const oppScore = home===team? r.scoreAway : r.scoreHome;
-    addCurrency((myScore>oppScore?300:150) + perfBonus(r));
+    addCurrency((myScore>oppScore?300:150) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, c.dayKey); try{ const o = loadMS(); if(!o.w.c.ps){ for(const p of ['w','m']) o[p].c.ps = 1; saveMS(o); } }catch(e){}
   }
   return r;
 }
@@ -2175,10 +2267,15 @@ function renderPostseason(ps){
 async function renderSchedule(){
   document.documentElement.style.setProperty('--tc', TC[team]); LAST_PS = null;
   document.getElementById('seasonInfo').textContent = '불러오는 중...';
+  // 클라우드(구글 로그인) 연결 확인이 끝날 때까지 기다림 — 먼저 로컬로 경기를 계산하면 결과가 서로 달라짐
+  try{ if(CLOUD_INIT) await Promise.race([CLOUD_INIT, new Promise(r=>setTimeout(r, 10000))]); }catch(e){}
   let season, sharedOk = DB_READY;
   if(DB_READY){
     try{ season = await catchUpSeasonShared(); }
-    catch(e){ sharedOk=false; season = loadSeason(); season = catchUpSeason(season); }
+    catch(e){
+      try{ await new Promise(r=>setTimeout(r,1500)); season = await catchUpSeasonShared(); } // 한 번 더 시도
+      catch(e2){ sharedOk=false; season = loadSeason(); } // 연결 실패 시 경기를 새로 계산하지 않음(클라우드와 결과가 달라지는 것 방지)
+    }
   } else {
     season = loadSeason(); season = catchUpSeason(season);
   }
@@ -2674,7 +2771,7 @@ function creditTitles(entries){
   const t = loadTitles(); let changed=false;
   for(const e0 of entries){ const e = e0 ? {...e0, champion: migTok(e0.champion), pennant: migTok(e0.pennant)} : e0;
     if(!e || !e.seasonStart || new Date(e.seasonStart) < new Date(t.since) - 42*86400000) continue;
-    if(e.champion===team && !t.ks.includes(e.seasonStart)){ t.ks.push(e.seasonStart); changed=true; addTickets(KS_WIN_TICKETS); setTimeout(()=>{ try{ alert(`🏆 ${team} 한국시리즈 우승! 뽑기권 ${KS_WIN_TICKETS}장을 받았어요.`); }catch(_){} }, 300); }
+    if(e.champion===team && !t.ks.includes(e.seasonStart)){ t.ks.push(e.seasonStart); changed=true; addTickets(KS_WIN_TICKETS); try{ if(new Date(e.seasonStart) > new Date(Date.now()-14*86400000)) msTally('ks',1); }catch(_){} setTimeout(()=>{ try{ alert(`🏆 ${team} 한국시리즈 우승! 뽑기권 ${KS_WIN_TICKETS}장을 받았어요.`); }catch(_){} }, 300); }
     if(e.pennant===team && !t.pen.includes(e.seasonStart)){ t.pen.push(e.seasonStart); changed=true; }
   }
   if(changed) saveTitles(t);
@@ -2882,7 +2979,7 @@ function openTrainModal(cardName){ // cardName = 카드 고유키(pkey)
       el.insertAdjacentHTML('beforeend', `<div class="goStudy" style="margin-top:6px; font-weight:800; color:var(--tc)">한 번 더 누르면 ${d.cost.toLocaleString()}냥으로 ${STUDY_DAYS}일 유학을 떠나요</div>`);
       return;
     }
-    addCurrency(-d.cost);
+    addCurrency(-d.cost); msTally('study',1);
     const roll = Math.random(); // 출발 시 결과 확정(창을 다시 열어도 바뀌지 않음)
     const success = roll < STUDY_SUCCESS, great = roll < STUDY_GREAT;
     let gains = success ? studyGains(d, c) : {...(c.pos==='타자'?d.failB:d.failP)};
@@ -3077,6 +3174,7 @@ function openFlipCard(c){
 }
 function attachFlip(container){
   container.querySelectorAll('[data-flipname]').forEach(el=>{
+    bindCardDetail(el);
     el.addEventListener('contextmenu', e=>{
       e.preventDefault();
       const key = el.dataset.flipname;
