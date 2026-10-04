@@ -939,14 +939,14 @@ function gameStatLine(c){
   const key = pkey(c);
   if(isB){
     const s = GS[key];
-    if(!s || s.pa===0) return {g:0, avg:0, hr:0, rbi:0};
-    return {g: s.g||undefined, pa:s.pa, ab:s.ab, avg: s.ab>0? s.h/s.ab : 0, hr:s.hr, rbi:s.rbi};
+    if(!s || s.pa===0) return {g:0, avg:0, ab:0, h:0, hr:0, rbi:0, sb:0};
+    return {g: s.g||0, pa:s.pa, ab:s.ab, h:s.h, avg: s.ab>0? s.h/s.ab : 0, hr:s.hr, rbi:s.rbi, sb:s.sb||0};
   } else {
     const s = GS[key];
-    if(!s || s.outs===0) return {ip:0, era:0, so:0, bb:0};
-    const ip = Math.floor(s.outs/3)+(s.outs%3)/10;
-    const era = ip>0? (s.runs*9/(s.outs/3)) : 0;
-    return {g:s.g, ip, era, so:s.so, bb:s.bb};
+    if(!s || (!s.outs && !s.g)) return {g:0, ip:0, era:0, so:0, bb:0, w:0, l:0, hld:0, sv:0};
+    const ip = Math.floor((s.outs||0)/3)+((s.outs||0)%3)/10;
+    const era = s.outs>0? (s.runs*9/(s.outs/3)) : 0;
+    return {g:s.g||0, ip, era, so:s.so||0, bb:s.bb||0, w:s.w||0, l:s.l||0, hld:s.hld||0, sv:s.sv||0};
   }
 }
 
@@ -1087,6 +1087,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
   const linescore={away:[],home:[]}, hits={away:0,home:0}, errors={away:0,home:0};
   const appeared = {away:new Set(), home:new Set()};
   const box = {away:{}, home:{}}, pbox = {away:{}, home:{}}, plays = [];
+  const apps = {away:[], home:[]}; let goAhead = null; // 승·패·세이브·홀드 판정용
   let walkoff=false, finished=false;
   for(let inning=1; inning<=MAX_INNINGS && !finished; inning++){
     log.push({t:'inn', text:`${inning}회`});
@@ -1100,6 +1101,8 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
       const pk = pkey(pitcher);
       if(!appeared[fieldSide].has(pk)){ appeared[fieldSide].add(pk); if(!NO_TALLY){ const p = GS[pk] || (GS[pk]={g:0,outs:0,runs:0,so:0,bb:0}); p.g++; } }
       const pb = pbox[fieldSide][pk] || (pbox[fieldSide][pk] = {n:pitcher.name, outs:0, r:0, so:0, h:0});
+      { const A = apps[fieldSide], last = A[A.length-1], lead = score[fieldSide]-score[side];
+        if(!last || last.pk!==pk) A.push({pk, entryLead:lead, exitLead:lead, starter: pitcher===pitchingStaff.starter}); }
       const def = avgDef(pitchingStaff.lineup), fd = fieldDef(pitchingStaff.lineup);
       let bases=[null,null,null]; let outs={o:0}; let innRuns=0;
       log.push({t:'half', text:`${inning}회 ${side==='away'?'초':'말'} (${side==='away'?awayName:homeName} 공격, 투수 ${pitcher.name})`});
@@ -1122,7 +1125,9 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
         const isHit = ['1B','2B','3B','HR'].includes(outcome.type);
         if(isHit){ hits[side]++; pb.h++; }
         if(res.error) errors[fieldSide]++;
-        if(res.runs>0) score[side]+=res.runs;
+        if(res.runs>0){ const before = score[side] - score[fieldSide]; score[side]+=res.runs;
+          if(before<=0 && score[side]>score[fieldSide]){ const As = apps[side]; const T = side==='away'?away:home;
+            goAhead = {side, win: As.length ? As[As.length-1].pk : (T.starter ? pkey(T.starter) : null), lose: pk}; } }
         pb.outs += outs.o - outsBefore; pb.r += res.runs; if(outcome.type==='K') pb.so++;
         tallyPlay(batter, pitcher, outcome.type==='E' ? {type:'OUT'} : outcome, res.error?0:res.runs);
         const b = box[side][pkey(batter)] || (box[side][pkey(batter)] = {n:batter.name, pos:batter.gamePos||batter.fieldpos||'', ab:0, h:0, hr:0, rbi:0, bb:0});
@@ -1132,9 +1137,30 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
         if(side==='home' && inning>=9 && wasBehindOrTied && score.home>score.away){ walkoff=true; finished=true; break; }
       }
       linescore[side].push(innRuns);
+      { const A = apps[fieldSide]; if(A.length) A[A.length-1].exitLead = score[fieldSide]-score[side]; }
     }
     if(inning>=9 && !finished && score.home!==score.away) finished = true; // 9회 이후 승부가 나면 종료(동점이면 연장, 최대 12회)
   }
+  // 승·패·세이브·홀드
+  const dec = {};
+  if(score.away!==score.home && goAhead){
+    const ws = score.home>score.away ? 'home' : 'away', ls = ws==='home' ? 'away' : 'home';
+    const outsOf = (s,k)=> (pbox[s][k]||{}).outs||0;
+    let W = goAhead.side===ws ? goAhead.win : null, L = goAhead.side===ws ? goAhead.lose : null;
+    const WA = apps[ws];
+    if(W && WA.length && WA[0].pk===W && WA[0].starter && outsOf(ws,W)<15){ // 선발 5이닝 미만이면 구원 중 가장 많이 던진 투수에게
+      const rel = WA.slice(1).map(x=>x.pk); if(rel.length) W = rel.sort((x,y)=>outsOf(ws,y)-outsOf(ws,x))[0]; }
+    if(!W && WA.length) W = WA[0].pk;
+    if(W) dec[ws+'#'+W] = 'W'; if(L) dec[ls+'#'+L] = 'L';
+    const fin = WA[WA.length-1];
+    if(fin && WA.length>1 && fin.pk!==W && fin.entryLead>=1 && fin.entryLead<=3) dec[ws+'#'+fin.pk] = 'SV';
+    for(const s of ['away','home']) apps[s].forEach((x,i)=>{ const isLast = i===apps[s].length-1;
+      if(!x.starter && !isLast && !dec[s+'#'+x.pk] && x.entryLead>=1 && x.entryLead<=3 && x.exitLead>0) dec[s+'#'+x.pk] = 'HLD'; });
+  }
+  for(const k in dec){ const [s, pk] = [k.slice(0,k.indexOf('#')), k.slice(k.indexOf('#')+1)];
+    if(pbox[s][pk]) pbox[s][pk].d = dec[k];
+    if(!NO_TALLY){ const p = GS[pk] || (GS[pk]={g:0,outs:0,runs:0,so:0,bb:0}); const f = {W:'w',L:'l',SV:'sv',HLD:'hld'}[dec[k]]; p[f] = (p[f]||0)+1; } }
+  if(!NO_TALLY) for(const T of [away, home]) new Set(T.lineup.filter(Boolean).map(pkey)).forEach(bk=>{ const b = GS[bk] || (GS[bk]={pa:0,ab:0,h:0,hr:0,rbi:0}); b.g = (b.g||0)+1; });
   // 불펜 피로 갱신(선발 제외)
   for(const side of ['away','home']){
     const T = side==='away'?away:home;
@@ -1291,7 +1317,7 @@ function simSeasonGame(g, ctx){
     out.box = { ls:{a:r.linescore.away, h:r.linescore.home}, h:{a:r.hits.away, h:r.hits.home}, e:{a:r.errors.away, h:r.errors.home},
       plays: r.plays.slice(0,15), side: mySide,
       bat: Object.values(mySide==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
-      pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so})) } };
+      pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) } };
     out.box.pk = SIM_CTX.dayKey+'|'+(ctx.slot||0)+'|'+g.away+'@'+g.home;
     pbpSave(out.box.pk, log);
   }
@@ -1532,7 +1558,7 @@ function showBoxScore(g, r, title){
     ${row(g.away, b.ls.a, r.scoreAway, b.h.a, b.e.a)}${row(g.home, b.ls.h, r.scoreHome, b.h.h, b.e.h)}</div>`;
   const tags = (r.highlights||[]).map(h=>({walkoff:'🎉 끝내기', extra:'⏱ 연장', home_nohitter:`🥇 ${g.home} 노히트`, away_nohitter:`🥇 ${g.away} 노히트`}[h]||'')).filter(Boolean).join(' · ');
   const bat = (b.bat||[]).map(x=>`<tr><td>${x.n}</td><td style="color:var(--sub)">${x.pos||''}</td><td>${x.ab}</td><td>${x.h}</td><td>${x.hr}</td><td>${x.rbi}</td><td>${x.bb}</td><td>${x.sb||0}</td></tr>`).join('');
-  const pit = side => (b.pit[side]||[]).map(x=>`<tr><td>${x.n}</td><td>${x.ip}</td><td>${x.r}</td><td>${x.so}</td></tr>`).join('');
+  const pit = side => (b.pit[side]||[]).map(x=>`<tr><td>${x.n}${x.d?` <b style="color:${x.d==='L'?'#e0312b':'#1a8a3a'}">${{W:'승',L:'패',SV:'세',HLD:'홀'}[x.d]}</b>`:''}</td><td>${x.ip}</td><td>${x.r}</td><td>${x.so}</td></tr>`).join('');
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
     <h3 style="margin-bottom:2px">${title||''}</h3><div style="font-size:12px; color:var(--sub)">${g.away} ${r.scoreAway} : ${r.scoreHome} ${g.home}${tags?' · '+tags:''}</div>
     ${grid}
@@ -2088,10 +2114,12 @@ async function catchUpSeasonShared(){
   let season = await getSharedSeason();
   const target = currentSlotIndex(season);
   const preBehind = season.preseason && preseasonTarget(season) > season.preseason.lastSimIdx;
-  if(target <= season.lastSimIdx && !preBehind) return season; // 이미 최신
+  // 다른 기기가 이미 계산했으면 선수 기록도 클라우드 것을 받아옴(안 받으면 이 기기의 옛 기록이 카드에 표시됨)
+  const pullGS = async ()=>{ try{ const g = await DB.doc(LG('gamestats')).get(); GS = g.exists ? (g.data()||{}) : {}; saveGameStats(GS); }catch(e){} };
+  if(target <= season.lastSimIdx && !preBehind){ await pullGS(); return season; } // 이미 최신
   const ref = DB.doc(LG('season'));
   const lease = await ref.acquire({holder:UID, ttlMs:15000});
-  if(!lease.acquired) return season; // 다른 사람이 지금 갱신 중 - 있는 그대로 표시
+  if(!lease.acquired){ await pullGS(); return season; } // 다른 기기가 지금 갱신 중 - 있는 그대로 표시
   const freshSnap = await ref.get();
   if(freshSnap.exists) season = freshSnap.data();
   const gsRef = DB.doc(LG('gamestats'));
@@ -2113,6 +2141,7 @@ async function catchUpSeasonShared(){
   }
   if(target2>season.lastSimIdx) season.lastSimIdx = target2;
   if(changed){ await ref.set(season); await gsRef.set(GS); }
+  saveGameStats(GS);
   return season;
 }
 async function getSharedPostseason(season){
@@ -3140,9 +3169,9 @@ function cardBackHTML(c){
   const heads = isB ? ['연도','G','AVG','HR','RBI'] : ['연도','G','ERA','IP','SO'];
   const gsl = gameStatLine(c);
   const gsRow = isB
-    ? `<tr><td>${gsl.pa||0}</td><td>${(gsl.avg||0).toFixed(3)}</td><td>${gsl.hr||0}</td><td>${gsl.rbi||0}</td></tr>`
-    : `<tr><td>${gsl.g||0}</td><td>${(gsl.era||0).toFixed(2)}</td><td>${(gsl.ip||0).toFixed(1)}</td><td>${gsl.so||0}</td></tr>`;
-  const gsHeads = isB ? ['PA','AVG','HR','RBI'] : ['G','ERA','IP','SO'];
+    ? `<tr><td>${gsl.g||0}</td><td>${(gsl.avg||0).toFixed(3)}</td><td>${gsl.ab||0}</td><td>${gsl.h||0}</td><td>${gsl.hr||0}</td><td>${gsl.rbi||0}</td><td>${gsl.sb||0}</td></tr>`
+    : `<tr><td>${gsl.g||0}</td><td>${(gsl.ip||0).toFixed(1)}</td><td>${(gsl.era||0).toFixed(2)}</td><td>${gsl.w||0}</td><td>${gsl.l||0}</td><td>${gsl.hld||0}</td><td>${gsl.sv||0}</td></tr>`;
+  const gsHeads = isB ? ['경기','타율','타수','안타','홈런','타점','도루'] : ['경기','이닝','평균자책','승','패','홀드','세이브'];
   return `<div class="flipcard rarity-${c.rarity}" style="background:#fff">
     <div class="fbody" style="padding-top:16px">
       <div class="fname">${c.name} <span style="font-size:11px; color:var(--sub); font-weight:400">시즌 성적</span></div>
