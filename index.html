@@ -260,7 +260,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div style="font-size:11px; color:var(--sub); margin-bottom:6px; line-height:1.6">카드 표시: 컨디션 ⇈최상 ↑좋음 →보통 ↓나쁨 ⇊최악(하루 단위, ±6%까지) · 🔒 시즌 중 선발 투수 교체 잠금(24시간) · 피로n 불펜 연투(다음 등판 −8%×n)</div>
 </div>
 <div id="lu-bat">
-<h2 class="sec">타순 (클릭해서 뺄 수 있어요 · 드래그로 배치 · 길게 누르거나 ⓘ·우클릭하면 카드 상세)</h2>
+<h2 class="sec">타순 (누르면 선택 → 바꿀 칸·선수를 누르기 · 드래그도 가능)</h2>
 <div class="slots orderrow" id="slots"></div>
 <button class="btn ghost" id="resetBtn" style="margin-top:10px">초기화</button> <button class="btn ghost" id="autoPosBtn" style="margin-top:10px">포지션 자동 배치</button>
 <div style="font-size:11px; color:var(--sub); margin-top:6px">타순마다 수비 포지션을 고를 수 있어요. 2025 수비 기록이 없는 포지션은 전 능력치 -10%(포수 자리는 -20%), 30이닝 미만은 -5%, 지명타자는 패널티 없음.</div>
@@ -272,7 +272,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div class="pool orderrow" id="pool"></div>
 </div>
 <div id="lu-pit" style="display:none">
-<h2 class="sec">투수진 (슬롯을 먼저 클릭 → 아래 명단에서 선수 클릭 · 길게 누르거나 ⓘ·우클릭하면 카드 상세)</h2>
+<h2 class="sec">투수진 (누르면 선택 → 바꿀 칸·투수를 누르기 · 드래그도 가능)</h2>
 <div id="pitcherSlots"></div>
 <button class="btn ghost" id="resetPitcherBtn" style="margin-top:10px">투수진 초기화</button>
 <h2 class="sec" id="pitcherPoolTitle">투수 대기 명단</h2>
@@ -2620,17 +2620,28 @@ function applyPositionFit(c, pos){
   if(f.pen) stats = stats.map(([l,v])=>[l, Math.max(1, Math.round(v*(1-f.pen)))]);
   return {...c, stats, gamePos:pos};
 }
+let LU_SEL = null; // 탭으로 선택한 타순 칸
 function renderLineup(){
   document.documentElement.style.setProperty('--tc', TC[team]); renderTactics(); renderLineupTabs();
   if(!lineup || lineup.length!==9) lineup = new Array(9).fill(null);
   const slotsDiv = document.getElementById('slots');
   const lpos = loadLineupPos();
+  if(LU_SEL!=null && LU_SEL>8) LU_SEL = null;
+  let bar = document.getElementById('luSelBar');
+  if(!bar){ bar = document.createElement('div'); bar.id = 'luSelBar'; slotsDiv.parentNode.insertBefore(bar, slotsDiv); }
+  if(LU_SEL==null){ bar.innerHTML = `<div style="font-size:11px; color:var(--sub); margin:2px 0 6px">💡 타순 카드를 누르면 선택돼요. 다른 타순·벤치·대기 카드를 누르면 자리가 바뀌어요. 카드 상세는 길게 누르기·ⓘ·우클릭</div>`; }
+  else { const sc = lineup[LU_SEL];
+    bar.innerHTML = `<div style="display:flex; align-items:center; gap:6px; background:#fff7e0; border:1.5px solid var(--gold); border-radius:8px; padding:6px 8px; margin:2px 0 6px; font-size:12px">
+      <div style="flex:1; min-width:0"><b>${LU_SEL+1}번 ${sc?sc.name:'(빈 칸)'}</b> 선택됨 — ${sc?'바꿀 타순·벤치·대기 선수를 누르세요':'넣을 선수를 누르세요'}</div>
+      ${sc?'<button class="btn ghost" id="luSelOut" style="padding:4px 10px; font-size:11px">빼기</button>':''}<button class="btn ghost" id="luSelCancel" style="padding:4px 10px; font-size:11px">취소</button></div>`;
+    const o = document.getElementById('luSelOut'); if(o) o.onclick = ()=>{ lineup[LU_SEL] = null; LU_SEL = null; saveLineup(); renderLineup(); renderHome(); };
+    document.getElementById('luSelCancel').onclick = ()=>{ LU_SEL = null; renderLineup(); }; }
   slotsDiv.innerHTML = lineup.map((c,i)=>{
     const f = positionFit(c, lpos[i]);
     const col = !c ? 'var(--sub)' : f.pen ? '#e0312b' : 'var(--sub)';
     return `<div style="display:flex; flex-direction:column; gap:3px; flex-shrink:0; width:78px">
       <div style="font-size:10px; font-weight:800; color:var(--navy); text-align:center">${i+1}번</div>
-      ${batterMiniCard(c, `data-i="${i}" ${c?'draggable="true"':''}`)}
+      ${batterMiniCard(c, `data-i="${i}" ${c?'draggable="true"':''} style="${LU_SEL===i?'outline:3px solid var(--gold); outline-offset:1px':''}"`)}
       <select data-pi="${i}" style="font-size:11px; padding:3px 2px; border-radius:6px; border:1.5px solid ${f.pen?'#e0312b':'#d8e0ee'}; font-weight:700">${LINEUP_POSITIONS.map(p=>`<option value="${p}" ${p===lpos[i]?'selected':''}>${POS_ABBR[p]} ${p}</option>`).join('')}</select>
       <div style="font-size:9.5px; text-align:center; color:${col}; min-height:12px">${c ? (f.pen ? `${f.label} -${Math.round(f.pen*100)}%` : f.label) : ''}</div>
     </div>`;
@@ -2641,15 +2652,30 @@ function renderLineup(){
     saveLineupPos(a); renderLineup();
   }));
   slotsDiv.querySelectorAll('.minicard').forEach(el=>{
-    el.addEventListener('click', ()=>{ if(el.classList.contains('filled')){ lineup[+el.dataset.i]=null; saveLineup(); renderLineup(); } });
+    el.addEventListener('click', ()=>{ const i = +el.dataset.i;
+      if(LU_SEL==null){ LU_SEL = i; renderLineup(); return; }        // 1) 타순 칸 선택
+      if(LU_SEL===i){ LU_SEL = null; renderLineup(); return; }        // 같은 칸 다시 누르면 취소
+      const s = LU_SEL; LU_SEL = null;
+      if(lineup[s]) lineupPlace(i, pkey(lineup[s]));                   // 2) 선택한 선수를 이 칸으로(맞바꿈)
+      else if(lineup[i]) lineupPlace(s, pkey(lineup[i]));             //    빈 칸을 골랐으면 이 선수를 그 빈 칸으로
+      else renderLineup();
+    });
     el.addEventListener('dragstart', e=>{ const c = lineup[+el.dataset.i]; if(c) e.dataTransfer.setData('text/plain', pkey(c)); });
     el.addEventListener('dragover', e=>{ e.preventDefault(); el.classList.add('dragover'); });
     el.addEventListener('dragleave', ()=>el.classList.remove('dragover'));
     el.addEventListener('drop', e=>{
       e.preventDefault(); el.classList.remove('dragover');
       const k = e.dataTransfer.getData('text/plain'); if(!k) return;
+      lineupPlace(+el.dataset.i, k);
+    });
+  });
+  attachFlip(slotsDiv);
+  renderLineupRest();
+}
+// 타순 칸 i에 카드 k 배치 (드래그·탭 공용): 타순끼리는 맞바꿈, 벤치/대기에서 오면 기존 선수는 그 자리로
+function lineupPlace(i, k){
       const c = CARDS.find(x=>pkey(x)===k); if(!c || c.pos!=='타자') return;
-      const i = +el.dataset.i, j = lineup.findIndex(x=>x && pkey(x)===k), occupant = lineup[i];
+      const j = lineup.findIndex(x=>x && pkey(x)===k), occupant = lineup[i];
       if(j===i) return;
       if(j>-1){ // 타순끼리: 자리 맞바꿈 + 포지션도 선수를 따라감
         const pos = loadLineupPos(); lineup[j] = occupant; lineup[i] = c; [pos[i], pos[j]] = [pos[j], pos[i]]; saveLineupPos(pos);
@@ -2661,9 +2687,8 @@ function renderLineup(){
         renderLineup(); renderHome(); return;
       }
       saveLineup(); renderLineup(); renderHome();
-    });
-  });
-  attachFlip(slotsDiv);
+}
+function renderLineupRest(){
   const owned = loadOwned();
   const poolAll = CARDS.filter(c=>c.pos==='타자' && owned.has(pkey(c)));
   const usedInLineup = new Set(lineup.filter(Boolean).map(pkey));
@@ -2701,6 +2726,7 @@ function renderLineup(){
       saveBench(new Set(arr)); renderLineup(); renderHome();
     });
     el.addEventListener('click', ()=>{
+      if(LU_SEL!=null){ const s = LU_SEL; LU_SEL = null; lineupPlace(s, el.dataset.n); return; }
       const b = loadBench(); b.delete(el.dataset.n); saveBench(b); renderLineup();
     });
   });
@@ -2719,6 +2745,7 @@ function renderLineup(){
   poolDiv.querySelectorAll('.minicard.filled').forEach(el=>{
     el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', el.dataset.n); });
     el.addEventListener('click', ()=>{
+      if(LU_SEL!=null){ const s = LU_SEL; LU_SEL = null; lineupPlace(s, el.dataset.n); return; }
       if(benchAdd(el.dataset.n)) renderLineup();
     });
   });
@@ -2796,7 +2823,7 @@ function renderPitchers(){
       html += `<div class="chev" style="display:flex; align-items:center; gap:4px; overflow-x:auto; padding-bottom:6px">`;
       pitcherLineup[cat].forEach((c,i)=>{
         const isSel = selPitcherSlot && selPitcherSlot.cat===cat && selPitcherSlot.i===i;
-        html += pitcherMiniCard(c, `data-cat="${cat}" data-i="${i}" ${c?'draggable="true"':''} style="${isSel?'outline:2px solid var(--gold)':''}"`);
+        html += pitcherMiniCard(c, `data-cat="${cat}" data-i="${i}" ${c?'draggable="true"':''} style="${isSel?'outline:3px solid var(--gold); outline-offset:1px':''}"`);
         if(i<pitcherLineup[cat].length-1) html += `<div class="chev">›</div>`;
       });
       html += `</div>`;
@@ -2804,17 +2831,32 @@ function renderPitchers(){
       html += `<div class="orderrow">`;
       pitcherLineup[cat].forEach((c,i)=>{
         const isSel = selPitcherSlot && selPitcherSlot.cat===cat && selPitcherSlot.i===i;
-        html += pitcherMiniCard(c, `data-cat="${cat}" data-i="${i}" ${c?'draggable="true"':''} style="${isSel?'outline:2px solid var(--gold)':''}"`);
+        html += pitcherMiniCard(c, `data-cat="${cat}" data-i="${i}" ${c?'draggable="true"':''} style="${isSel?'outline:3px solid var(--gold); outline-offset:1px':''}"`);
       });
       html += `</div>`;
     }
   }
   slotsDiv.innerHTML = html;
+  let pbar = document.getElementById('ptSelBar');
+  if(!pbar){ pbar = document.createElement('div'); pbar.id = 'ptSelBar'; slotsDiv.parentNode.insertBefore(pbar, slotsDiv); }
+  if(!selPitcherSlot) pbar.innerHTML = `<div style="font-size:11px; color:var(--sub); margin:2px 0 6px">💡 투수 칸을 누르면 선택돼요. 다른 칸을 누르면 자리가 바뀌고, 대기 명단 투수를 누르면 그 칸에 들어가요.</div>`;
+  else { const S = selPitcherSlot, sc = pitcherLineup[S.cat][S.i];
+    pbar.innerHTML = `<div style="display:flex; align-items:center; gap:6px; background:#fff7e0; border:1.5px solid var(--gold); border-radius:8px; padding:6px 8px; margin:2px 0 6px; font-size:12px">
+      <div style="flex:1; min-width:0"><b>${ROLE_LABELS[S.cat].split(' ')[0].replace(/\(.*\)/,'')} ${S.i+1} ${sc?sc.name:'(빈 칸)'}</b> 선택됨 — ${sc?'바꿀 칸이나 대기 투수를 누르세요':'넣을 투수를 누르세요'}</div>
+      ${sc?'<button class="btn ghost" id="ptSelOut" style="padding:4px 10px; font-size:11px">빼기</button>':''}<button class="btn ghost" id="ptSelCancel" style="padding:4px 10px; font-size:11px">취소</button></div>`;
+    const o = document.getElementById('ptSelOut'); if(o) o.onclick = ()=>{ pitcherLineup[S.cat][S.i] = null; selPitcherSlot = null; savePitcherLineup(); renderPitchers(); renderCostBar(); };
+    document.getElementById('ptSelCancel').onclick = ()=>{ selPitcherSlot = null; renderPitchers(); }; }
   slotsDiv.querySelectorAll('.minicard').forEach(el=>{
     const cat = el.dataset.cat, i = +el.dataset.i;
     el.addEventListener('click', ()=>{
-      if(pitcherLineup[cat][i]){ pitcherLineup[cat][i]=null; selPitcherSlot=null; savePitcherLineup(); renderPitchers(); renderCostBar(); return; }
-      selPitcherSlot = {cat, i}; renderPitchers();
+      const s = selPitcherSlot;
+      if(!s){ selPitcherSlot = {cat, i}; renderPitchers(); return; }
+      if(s.cat===cat && s.i===i){ selPitcherSlot = null; renderPitchers(); return; }
+      selPitcherSlot = null;
+      const a = pitcherLineup[s.cat][s.i], b = pitcherLineup[cat][i];
+      if(a){ if(!assignPitcherToSlot(a, cat, i)) renderPitchers(); }   // 선택한 투수를 이 칸으로(맞바꿈)
+      else if(b){ if(!assignPitcherToSlot(b, s.cat, s.i)) renderPitchers(); }
+      else renderPitchers();
     });
     el.addEventListener('dragstart', e=>{ const c = pitcherLineup[cat][i]; if(c) e.dataTransfer.setData('text/plain', pkey(c)); });
     el.addEventListener('dragover', e=>{ e.preventDefault(); el.classList.add('dragover'); });
@@ -2839,7 +2881,7 @@ function renderPitchers(){
   pFilterBar.querySelectorAll('[data-sort]').forEach(el=>el.addEventListener('click', ()=>{ const v = el.dataset.sort.split(':')[1]; pitcherSort = pitcherSort===v ? null : v; renderPitchers(); }));
   remain = poolFilter(remain,'p'); bindPoolTools('p', renderPitchers);
   remain = applySort(remain, pitcherSort);
-  document.getElementById('pitcherPoolTitle').textContent = `투수 대기 명단 (${remain.length}명) — 카드를 슬롯으로 끌어다 놓으세요(모바일은 슬롯 선택 후 탭)`;
+  document.getElementById('pitcherPoolTitle').textContent = `투수 대기 명단 (${remain.length}명) — 칸을 먼저 누른 뒤 투수를 누르거나 끌어다 놓으세요`;
   const poolDiv = document.getElementById('pitcherPool');
   poolDiv.innerHTML = remain.map(c=>pitcherMiniCard(c, `data-n="${pkey(c)}" draggable="true"`)).join('');
   poolDiv.querySelectorAll('.minicard.filled').forEach(el=>{
@@ -2847,7 +2889,8 @@ function renderPitchers(){
     el.addEventListener('click', ()=>{
       if(!selPitcherSlot) return;
       const c = allP.find(x=>pkey(x)===el.dataset.n);
-      if(assignPitcherToSlot(c, selPitcherSlot.cat, selPitcherSlot.i)) selPitcherSlot = null;
+      const S = selPitcherSlot; selPitcherSlot = null;
+      if(!assignPitcherToSlot(c, S.cat, S.i)) renderPitchers();
     });
   });
   attachFlip(poolDiv);
