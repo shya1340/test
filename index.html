@@ -64,6 +64,9 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 .stat{display:grid; grid-template-columns:32px 1fr 24px; align-items:center; gap:6px; font-size:9.5px; margin:3px 0;}
 .stat .lbl{opacity:.85; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .stat .val{text-align:right; font-weight:700; font-variant-numeric:tabular-nums;}
+.stat.bx{grid-template-columns:32px 1fr minmax(24px,auto)}
+.stat .val{white-space:nowrap}
+.bplus{color:#1a8a3a; font-size:.85em; font-weight:800; margin-left:2px}
 .bar{width:100%; height:4px; background:rgba(255,255,255,.15); border-radius:3px; overflow:hidden;}
 .fill{height:100%; background:var(--gold);}
 .filtertabs{display:flex; gap:6px; margin-bottom:10px;}
@@ -3051,6 +3054,28 @@ function applyTeamColor(c, tc){
   const k = c.pos==='타자' ? tc.bat : tc.pit;
   return {...c, stats: c.stats.map(([l,v])=>[l, v+k])};
 }
+// 화면 표시용: 보유 카드의 능력치 보너스(블록·유학·겹치기 + 팀컬러)
+function statBonusInfo(c){
+  const out = {map:{}, tc:0, tcInfo:null};
+  try{
+    if(!c || !loadOwned().has(pkey(c))) return out;
+    const m = {...cardBonusMap(pkey(c))};
+    const tc = teamColorInfo();
+    if(tc && tc.grade && c.team===tc.team && cardYear(c)===tc.year){
+      const k = c.pos==='타자' ? tc.bat : tc.pit; out.tc = k; out.tcInfo = tc;
+      c.stats.forEach(([l])=>{ m[l] = (m[l]||0) + k; });
+    }
+    out.map = m;
+  }catch(e){}
+  return out;
+}
+function bonusTag(n){ return n>0 ? `<span class="bplus">(+${n})</span>` : ''; }
+function statRowsHTML(c, color){
+  const B = statBonusInfo(c);
+  return c.stats.map(([l,v])=>{ const b = B.map[l]||0, v2 = v+b;
+    return `<div class="stat bx"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v2)}%; background:${color}"></div></div><div class="val" style="color:var(--ink)">${v2}${bonusTag(b)}</div></div>`; }).join('')
+    + (B.tc ? `<div style="font-size:10px; font-weight:800; color:#1a8a3a; margin:3px 0 1px">⚑ 팀컬러 ${B.tcInfo.grade}등급 적용 중 (전 능력치 +${B.tc})</div>` : '');
+}
 // 스킬블록·유학 보너스와 팀컬러는 내 팀 경기에서, 내가 보유한 카드에만 적용 (AI 팀의 같은 선수에게는 적용 안 됨)
 lineupFor = function(t){
   const base = _lineupForBase(t);
@@ -3121,7 +3146,7 @@ function openTrainModal(cardName){ // cardName = 카드 고유키(pkey)
 
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
     <h3>${c.name}${yrTag(c)} <span style="font-size:12px; font-weight:800; color:${TC[c.team]}">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</span>${dupeCount(c)?` <span style="font-size:12px; color:var(--gold)">겹치기 ${dupeCount(c)}/${DUPE_MAX} (전 능력치 +${dupeBonus(dupeCount(c))})</span>`:''}</h3>
-    <div style="font-size:12px; color:var(--sub); margin-bottom:6px">${c.stats.map(([l,v])=>`${l} ${v+(cardBonusMap(cardName)[l]||0)}`).join(' · ')}</div>
+    <div style="font-size:12px; color:var(--sub); margin-bottom:6px">${(()=>{ const B = statBonusInfo(c); return c.stats.map(([l,v])=>`${l} <b style="color:var(--ink)">${v+(B.map[l]||0)}</b>${bonusTag(B.map[l]||0)}`).join(' · ') + (B.tc?`<div style="color:#1a8a3a; font-weight:800; margin-top:2px">⚑ 팀컬러 ${B.tcInfo.grade}등급 적용 중 (+${B.tc})</div>`:''); })()}</div>
     <h2 class="sec">스킬블록 장착 (3슬롯)</h2>
     <div>${slotsHtml}</div>
     <h2 class="sec">보유 블록 (클릭해서 장착)</h2>
@@ -3297,7 +3322,7 @@ function cardFrontHTML(c){
     <div class="fbody">
       <div class="fname">${c.name}${yrTag(c)}</div>
       <div class="fteam">${c.team} · ${posLabel} · ${c.tier} · ${c.year||2025}시즌</div>
-      ${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%; background:${RARITY_COLOR[c.rarity]}"></div></div><div class="val" style="color:var(--ink)">${v}</div></div>`).join('')}
+      ${statRowsHTML(c, RARITY_COLOR[c.rarity])}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
     </div>
   </div>`;
@@ -3327,7 +3352,7 @@ function cardBackHTML(c){
         ${gsRow.replace(/<td>/g,'<td style="padding:4px 2px; border-bottom:1px solid #f5f7fa">')}
       </table>
       ${isB ? positionGradesHTML(c) : pitcherGradesHTML(c)}
-      ${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl" style="color:var(--sub)">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%; background:${RARITY_COLOR[c.rarity]}"></div></div><div class="val" style="color:var(--ink)">${v}</div></div>`).join('')}
+      ${statRowsHTML(c, RARITY_COLOR[c.rarity])}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
     </div>
   </div>`;
@@ -3395,7 +3420,7 @@ function showTeamDex(t){
     const posLbl = c.pos==='타자' ? (c.fieldpos||'타자') : c.pos;
     return `<div class="card ${tbg(c.team,'d')}${has?dupCls(c):''}" data-flipname="${pkey(c)}" style="position:relative; background-color:${TC[c.team]}; border:2px solid ${rc[c.rarity]}; ${has?'':'filter:grayscale(1); opacity:.55;'}"><div class="band" style="display:flex; gap:6px; align-items:center"><div style="min-width:0"><div class="tier" style="background:${rc[c.rarity]}; color:#fff">${c.rarity}</div><div class="name">${c.name}${yrTag(c)}</div>
       <div style="font-size:10px; opacity:.85">${c.team} · ${posLbl}${has ? ` · <b style="color:#ffe08a">보유${dn?` +${dn}`:''}</b>` : ' · 미보유'}</div></div></div>
-    <div class="body2">${c.stats.map(([l,v])=>`<div class="stat"><div class="lbl">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v)}%"></div></div>${v}</div>`).join('')}
+    <div class="body2">${(()=>{ const B = has ? statBonusInfo(c) : {map:{}}; return c.stats.map(([l,v])=>{ const b = B.map[l]||0, v2 = v+b; return `<div class="stat bx"><div class="lbl">${l}</div><div class="bar"><div class="fill" style="width:${Math.min(100,v2)}%"></div></div><div class="val">${v2}${b>0?`<span class="bplus" style="color:#7ee29a">(+${b})</span>`:''}</div></div>`; }).join(''); })()}
     <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.15); color:var(--gold); font-size:10px">COST ${starsHTML(c.cost)}</div></div></div>`;
   }).join('');
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
