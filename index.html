@@ -189,6 +189,9 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
     <div style="text-align:left; font-size:12px; font-weight:800; color:var(--navy); margin:12px 0 4px">구단 이름 <span style="font-weight:400; color:var(--sub)">· 순위표·일정에 이 이름으로 나와요</span></div>
     <input id="setupTeamName" placeholder="예: 서울 썬더스 (2~10자)" maxlength="10" class="loginInput">
     <div style="text-align:left; font-size:12px; font-weight:800; color:var(--navy); margin:12px 0 4px">베이스 팀 <span style="font-weight:400; color:var(--sub)">· 팀 색·배경·시작 선수 풀 · 고른 뒤 변경 불가</span></div>
+    <div style="text-align:left; font-size:12px; font-weight:800; color:var(--navy); margin:12px 0 4px">리그 코드 <span style="font-weight:400; color:var(--sub)">· 친구 리그에 들어갈 때만 입력 (없으면 비워두세요)</span></div>
+    <div style="display:flex; gap:6px"><input id="setupLgCode" placeholder="예: K7P2QX" maxlength="6" class="loginInput" style="flex:1; text-transform:uppercase"><button class="btn ghost" id="setupLgCheck" style="padding:8px 12px; white-space:nowrap">확인</button></div>
+    <div id="setupLgInfo" style="font-size:11px; color:var(--sub); text-align:left; margin-top:4px"></div>
     <div class="orderrow" id="setupGrid" style="justify-content:center; flex-wrap:wrap; overflow:visible; gap:8px"></div>
     <button class="btn" style="width:100%; margin-top:14px; padding:12px" id="setupGo">창단하기</button>
   </div>
@@ -218,6 +221,8 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <h2 class="sec">현재 타순</h2>
 <div id="homeLineupPreview" class="result-line"></div>
 
+<h2 class="sec" style="margin-top:22px">공유 리그</h2>
+<div id="leagueBox" class="result-line">불러오는 중...</div>
 <h2 class="sec" style="margin-top:22px">계정 · 동기화</h2>
 <div id="leagueTeamsBox" class="result-line">계정 연결을 확인하는 중...</div>
 
@@ -394,6 +399,7 @@ let lineup = loadLineupObjs();
 
 // ===== 계정 동기화 (personal db, 닉네임별 세이브) =====
 let DB = null, UID = null, DB_READY = false, pushTimer = null, pushInFlight = false, pushQueued = false;
+let LEAGUE = null, LEAGUE_SNAP_TIMER = null; // 공유 리그 상태
 const PERSONAL_TEAM_KEYS = ['sn_presets_','sn_tactics_','sn_locks_','sn_lineuppos_','sn_lineup_','sn_pitchers_','sn_currency_','sn_tickets_','sn_blocks_','sn_equip_','sn_permboost_','sn_abroad_','sn_bench_'];
 function ns(){ return getNickname() || 'guest'; }
 function collectSyncPayload(){
@@ -404,7 +410,7 @@ function collectSyncPayload(){
     PERSONAL_TEAM_KEYS.forEach(pref=>{ const v = localStorage.getItem(pref+nick+'_'+t); if(v!==null) td[pref]=v; });
     if(Object.keys(td).length) teamsData[t]=td;
   });
-  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, missions: localStorage.getItem('sn_missions_'+nick)||null, teamname: localStorage.getItem('sn_teamname_'+nick)||null, attstreak: localStorage.getItem('sn_attstreak_'+nick)||null, updatedAt: new Date().toISOString() };
+  return { lastTeam: team, teams: teamsData, owned: localStorage.getItem('sn_owned_'+nick)||'[]', onboarded: localStorage.getItem('sn_onboarded_'+nick)||'[]', teamlock: localStorage.getItem('sn_teamlock_'+nick)||null, titles: localStorage.getItem('sn_titles_'+nick)||null, dupes: localStorage.getItem('sn_dupes_'+nick)||null, missions: localStorage.getItem('sn_missions_'+nick)||null, teamname: localStorage.getItem('sn_teamname_'+nick)||null, attstreak: localStorage.getItem('sn_attstreak_'+nick)||null, lgcode: localStorage.getItem('sn_lgcode_'+nick)||'', lgcredit: localStorage.getItem('sn_lgcredit_'+nick)||null, lgsrw: localStorage.getItem('sn_lgsrw_'+nick)||null, updatedAt: new Date().toISOString() };
 }
 // ----- 기기 간 동기화 보호: 빈 새 기기가 다른 기기의 진행을 덮어쓰지 않게 -----
 function localSummary(nick){
@@ -451,6 +457,7 @@ async function pushNow(force){
 }
 function schedulePush(){
   if(!DB_READY) return;
+  if(LEAGUE && LEAGUE.code && !LEAGUE.gone){ clearTimeout(LEAGUE_SNAP_TIMER); LEAGUE_SNAP_TIMER = setTimeout(()=>{ pushMember().catch(()=>{}); }, 4000); }
   clearTimeout(pushTimer);
   pushTimer = setTimeout(pushNow, 800);
 }
@@ -468,6 +475,9 @@ function applySyncPayloadForNick(nick, data){
   if(data.missions) localStorage.setItem('sn_missions_'+nick, data.missions);
   if(data.teamname) localStorage.setItem('sn_teamname_'+nick, data.teamname);
   if(data.attstreak) localStorage.setItem('sn_attstreak_'+nick, data.attstreak);
+  if(typeof data.lgcode==='string'){ if(data.lgcode) localStorage.setItem('sn_lgcode_'+nick, data.lgcode); else localStorage.removeItem('sn_lgcode_'+nick); }
+  if(data.lgcredit) localStorage.setItem('sn_lgcredit_'+nick, data.lgcredit);
+  if(data.lgsrw) localStorage.setItem('sn_lgsrw_'+nick, data.lgsrw);
   if(data.lastTeam) { team = data.lastTeam; localStorage.setItem('sn_team_'+nick, team); }
   if(data.teamlock) { localStorage.setItem('sn_teamlock_'+nick, data.teamlock); localStorage.setItem('sn_team_'+nick, data.teamlock); team = data.teamlock; }
 }
@@ -531,7 +541,7 @@ function afterLoginEnter(){
   team = teamLock(); applyTeamLock(); lineup = loadLineupObjs(); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null;
   GS = loadGameStats(); try{ refreshCurrencyDisplay(); renderHome(); }catch(e){}
 }
-let SETUP_TEAM = null;
+let SETUP_TEAM = null, SETUP_TAKEN = null, SETUP_LG = null;
 function showSetupPage(){
   const nick = getNickname(), locked = teamLock();
   const mgr = document.getElementById('setupMgr'), tn = document.getElementById('setupTeamName');
@@ -540,7 +550,8 @@ function showSetupPage(){
   SETUP_TEAM = locked || null;
   document.getElementById('setupSub').textContent = locked ? `베이스 팀(${locked})은 그대로이고, 구단 이름만 정하면 돼요` : '감독 이름과 구단 이름을 정하고 베이스 팀을 골라주세요';
   const grid = document.getElementById('setupGrid');
-  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled ${t===SETUP_TEAM?'setupSel':''} ${locked && t!==locked?'locked':''}" data-team="${t}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
+  const taken = SETUP_TAKEN || {};
+  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled ${t===SETUP_TEAM?'setupSel':''} ${(locked && t!==locked) || (!locked && taken[t])?'locked':''}" data-team="${t}" title="${taken[t]?'이미 다른 감독이 맡은 팀':''}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
   grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{ if(locked) return; SETUP_TEAM = el.dataset.team; grid.querySelectorAll('.minicard').forEach(x=>x.classList.toggle('setupSel', x.dataset.team===SETUP_TEAM)); if(!tn.value.trim()) tn.placeholder = `예: ${SETUP_TEAM} 구단명`; }));
   document.getElementById('setupPage').classList.add('active');
 }
@@ -551,6 +562,9 @@ document.getElementById('setupGo').addEventListener('click', async ()=>{
   if(tname.length<2){ alert('구단 이름을 2자 이상 입력해주세요.'); return; }
   if(TEAMS.includes(tname) && tname!==SETUP_TEAM){ alert('다른 AI 구단과 같은 이름은 쓸 수 없어요.'); return; }
   if(!SETUP_TEAM){ alert('베이스 팀을 골라주세요.'); return; }
+  const lgIn = (document.getElementById('setupLgCode').value||'').trim().toUpperCase();
+  if(lgIn && (!SETUP_LG || SETUP_LG.code!==lgIn)){ alert('리그 코드 옆 "확인"을 먼저 눌러주세요.'); return; }
+  if(lgIn && SETUP_TAKEN && SETUP_TAKEN[SETUP_TEAM]){ alert(`${SETUP_TEAM}은(는) 이 리그에서 이미 다른 감독이 맡고 있어요. 다른 베이스 팀을 골라주세요.`); return; }
   const wasLocked = !!teamLock() && getNickname()===mgr;
   if(!wasLocked && !confirm(`감독 ${mgr} · 구단 ${tname} (베이스 ${SETUP_TEAM})\n이대로 창단할까요? 베이스 팀은 나중에 바꿀 수 없어요.`)) return;
   localStorage.setItem('sn_nickname', mgr);
@@ -563,6 +577,22 @@ document.getElementById('setupGo').addEventListener('click', async ()=>{
   try{ refreshCurrencyDisplay(); renderHome(); }catch(e){}
   try{ await pushNow(true); }catch(e){}
   if(loadOnboarded().size===0) triggerOnboarding(team);
+  if(lgIn && SETUP_LG){ try{ await joinLeague(lgIn, true); }catch(e){ alert('리그 참가 실패: '+(e && e.message || e)); } }
+});
+document.getElementById('setupLgCheck').addEventListener('click', async ()=>{
+  const code = (document.getElementById('setupLgCode').value||'').trim().toUpperCase(), info = document.getElementById('setupLgInfo');
+  SETUP_LG = null; SETUP_TAKEN = null;
+  if(!code){ info.textContent = ''; showSetupPage(); return; }
+  if(!DB_READY){ info.textContent = '로그인 연결을 확인하는 중이에요. 잠시 후 다시 눌러주세요.'; return; }
+  info.textContent = '리그를 찾는 중...';
+  const L = await fetchLeague(code);
+  if(!L){ info.textContent = '그 코드의 리그를 찾지 못했어요. 코드를 다시 확인해 주세요.'; showSetupPage(); return; }
+  SETUP_LG = L; SETUP_TAKEN = takenBases(L);
+  const n = Object.keys(SETUP_TAKEN).length;
+  info.innerHTML = `✓ 리그 <b>${code}</b> (방장 ${L.root.ownerNick||'-'}) · 감독 ${n}명 참가 중 · 흐리게 보이는 팀은 이미 주인이 있어요`;
+  const keep = {mgr: document.getElementById('setupMgr').value, tn: document.getElementById('setupTeamName').value};
+  showSetupPage(); document.getElementById('setupMgr').value = keep.mgr; document.getElementById('setupTeamName').value = keep.tn; document.getElementById('setupLgCode').value = code;
+  if(SETUP_TEAM && SETUP_TAKEN[SETUP_TEAM]){ SETUP_TEAM = null; showSetupPage(); document.getElementById('setupMgr').value = keep.mgr; document.getElementById('setupTeamName').value = keep.tn; document.getElementById('setupLgCode').value = code; }
 });
 async function googleLogin(){
   const st = document.getElementById('fbLoginStatus'); if(st) st.textContent = '로그인 창을 여는 중...';
@@ -610,6 +640,7 @@ async function initCloudSync(){
       }
     }
     DB_READY = true; try{ localStorage.setItem('sn_authuid', UID); }catch(e){}
+    try{ await loadLeague(); }catch(e){}
     if(!hasClaudeRuntime() || true) setTimeout(afterLoginEnter, 0);
     CLOUD_SYNC_STATUS = hasClaudeRuntime() ? '정상 연결됨 (UID: '+UID+')' : '구글 계정 동기화 켜짐 ('+(USER_LABEL||UID)+')';
     if(CLOUD_FORCE_PUSH){ CLOUD_FORCE_PUSH = false; pushNow(true); } else schedulePush(); // 최초 상태도 클라우드에 한 번 올려둠
@@ -624,9 +655,10 @@ CLOUD_INIT = initCloudSync();
 // ===== 리그 참가 (팀 등록) =====
 const TEAM_CODE = {'산예':'samsung','술사':'kt','북두':'lg','백호':'kia','반달':'doosan','이무기':'nc','비차':'ssg','바다매':'lotte','송골':'hanwha','화랑':'kiwoom'};
 async function renderLeagueTeams(){
+  try{ renderLeagueBox(); }catch(e){}
   const box = document.getElementById('leagueTeamsBox');
   // 개인 리그: 팀 등록 없이 각자 자기 시즌 진행(상대 9팀은 AI)
-  if(DB_READY){ box.innerHTML = `✓ 동기화 켜짐${USER_LABEL?` (${USER_LABEL})`:''} — PC·모바일에서 이어서 할 수 있어요.<br><span style="font-size:11px; color:var(--sub)">개인 리그: 닉네임마다 나만의 시즌이 진행되고, 상대 9팀은 AI가 맡아요.</span>`; return; }
+  if(DB_READY){ box.innerHTML = `✓ 동기화 켜짐${USER_LABEL?` (${USER_LABEL})`:''} — PC·모바일에서 이어서 할 수 있어요.<br><span style="font-size:11px; color:var(--sub)">${inLeague() ? '공유 리그: 같은 리그 감독들과 한 시즌을 함께 진행해요.' : '개인 리그: 닉네임마다 나만의 시즌이 진행되고, 상대 9팀은 AI가 맡아요.'}</span>`; return; }
   if(!DB_READY){
     if(!hasClaudeRuntime()){ box.innerHTML = `구글 로그인하면 PC·모바일 진행이 이어져요. (로그인하지 않으면 이 브라우저에만 저장돼요)<br><button class="btn ghost" id="homeGoogleLogin" style="margin-top:6px; padding:6px 14px; font-size:12px">구글 로그인</button><div style="font-size:11px; color:var(--sub); margin-top:4px">${CLOUD_SYNC_STATUS}</div>`; const b = document.getElementById('homeGoogleLogin'); if(b) b.addEventListener('click', googleLogin); return; }
     box.textContent = '계정에 연결되면 여기서 팀을 등록해 다른 사람과 리그를 나눠 맡을 수 있어요. [진단: '+CLOUD_SYNC_STATUS+']'; return;
@@ -681,6 +713,194 @@ async function releaseTeam(code){
   }
 }
 
+// ===== 공유 리그 =====
+// 구조: leagues/{코드} (방장) · leagues/{코드}/members/{베이스팀코드} (감독별: 이름·참가 시각·마지막 접속·라인업 스냅샷)
+//       leagues/{코드}/d/{season|gamestats|postseason|history|box_팀} (공용 시즌 데이터)
+// 경기 계산은 지금처럼 먼저 접속한 기기가 하고, 다른 감독 팀은 그 감독이 올려둔 마지막 라인업으로 뛰어요.
+function snapOf(t){ const m = inLeague() && LEAGUE.members[t]; return (m && m.snap) || null; }
+function snapCard(o){ if(!o) return null; const b = cardByKey(o.k); if(!b) return null;
+  const c = {...b, stats: b.stats.map(([l,v],i)=>[l, (o.s && o.s[i]!=null) ? o.s[i] : v])}; if(o.gp) c.gamePos = o.gp; return c; }
+function snapLineup(t){ if(!inLeague() || !isHuman(t, SIM_CTX && SIM_CTX.at)) return null; const s = snapOf(t); if(!s || !s.lu) return null;
+  const L = s.lu.map(snapCard); return (L.length===9 && L.every(Boolean)) ? L : null; }
+function snapStaff(t){ if(!inLeague() || !isHuman(t, SIM_CTX && SIM_CTX.at)) return null; const s = snapOf(t); if(!s || !s.st) return null;
+  const o = {}; for(const k of ['starters','middle','setup','closer']){ o[k] = (s.st[k]||[]).map(snapCard); if(!o[k].length || !o[k].every(Boolean)) return null; } return o; }
+function snapBench(t){ const s = snapOf(t); return s ? (s.bench||[]).map(snapCard).filter(Boolean) : []; }
+function buildSnap(){
+  const enc = c => c ? {k: pkey(c), s: c.stats.map(x=>x[1]), gp: c.gamePos||null} : null;
+  const lu = lineupFor(team), st = staffFor(team), own = loadOwned();
+  const bench = [...loadBench()].filter(k=>own.has(k)).map(k=>cardByKey(k)).filter(c=>c && c.pos==='타자').map(c=>boostedCard(c));
+  const P = [...st.starters, ...st.middle, ...st.setup, ...st.closer].filter(Boolean);
+  return {lu: lu.map(enc), st: {starters: st.starters.map(enc), middle: st.middle.map(enc), setup: st.setup.map(enc), closer: st.closer.map(enc)},
+    bench: bench.map(enc), tactics: loadTactics(), str: {bat: avgAllStats(lu.filter(Boolean)), pit: avgAllStats(P)}, at: Date.now()};
+}
+function genLeagueCode(){ const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = ''; for(let i=0;i<6;i++) s += A[Math.floor(Math.random()*A.length)]; return s; }
+async function fetchLeague(code){
+  const root = await DB.doc('leagues/'+code).get(); if(!root.exists) return null;
+  const ms = await DB.collection('leagues/'+code+'/members').get();
+  const members = {}; ms.docs.forEach(d=>{ const x = d.data(); if(x && x.base) members[x.base] = x; });
+  return {code, root: root.data(), members};
+}
+function memberStale(m){ return !m || m.left || (Date.now() - (m.lastSeenMs||0) > LG_IDLE_MS); }
+function takenBases(L){ const o = {}; for(const t in L.members){ const m = L.members[t]; if(m && !m.left && m.uid!==UID && !memberStale(m)) o[t] = m; } return o; }
+async function loadLeague(){
+  const code = leagueCode();
+  if(!code || !DB_READY){ LEAGUE = null; return null; }
+  const L = await fetchLeague(code);
+  if(!L){ LEAGUE = null; return null; }
+  const me = L.members[team];
+  if(!me || me.uid!==UID || me.left){ // 리그에서 빠졌거나(장기 미접속 후 다른 감독이 이어받음) 기록이 없음
+    LEAGUE = {...L, active:false, gone:true}; return LEAGUE; }
+  LEAGUE = {...L, active: Date.now() >= Date.parse(me.activeFrom||0)};
+  pushMember().catch(()=>{});
+  return LEAGUE;
+}
+async function pushMember(extra){
+  if(!LEAGUE || !LEAGUE.code || LEAGUE.gone || !DB_READY) return;
+  const me = LEAGUE.members[team] || {};
+  const d = {...me, ...(extra||{}), uid: UID, nick: getNickname(), name: myTeamName(), base: team, lastSeen: new Date().toISOString(), lastSeenMs: Date.now(), snap: buildSnap()};
+  LEAGUE.members[team] = d;
+  await DB.doc('leagues/'+LEAGUE.code+'/members/'+TEAM_CODE[team]).set(d);
+}
+async function leagueSeasonInfo(code){ // 리그 시즌 상태(정규시즌 진행 중이면 다음 시즌부터 참가)
+  try{ const s = await DB.doc('leagues/'+code+'/d/season').get(); if(!s.exists) return null; const d = s.data(); return {seasonStart: d.seasonStart, lastSimIdx: d.lastSimIdx}; }catch(e){ return null; }
+}
+function nextJoinTime(info){
+  if(!info) return Date.now();
+  const st = Date.parse(info.seasonStart);
+  if(Date.now() < st) return Date.now(); // 개막 전(시범경기 기간) → 바로 참가
+  return st + 7*86400000; // 정규시즌 진행 중 → 다음 시즌 개막(다음 일요일 07시)부터
+}
+function resetLeagueView(){ LAST_SEASON = null; LAST_PS = null; SUMMARY_HTML = null; GS = loadGameStats(); }
+async function createLeague(){
+  if(!DB_READY){ alert('구글 로그인 후에 만들 수 있어요.'); return; }
+  if(!confirm('새 공유 리그를 만들까요?\n\n· 리그는 다음 일요일 07시에 개막해요(그 전까지 시범경기)\n· 만든 뒤 나오는 6자리 코드를 친구에게 알려주면 돼요\n· 지금 개인 리그 기록은 그대로 보관되고, 리그를 나가면 다시 돌아가요')) return;
+  let code = ''; for(let i=0;i<5;i++){ code = genLeagueCode(); const ex = await DB.doc('leagues/'+code).get(); if(!ex.exists) break; }
+  await DB.doc('leagues/'+code).set({code, owner: UID, ownerNick: getNickname(), createdAt: new Date().toISOString()});
+  localStorage.setItem('sn_lgcode_'+ns(), code);
+  LEAGUE = {code, root: {code, owner: UID, ownerNick: getNickname()}, members: {}, active: true};
+  await pushMember({joinedAt: new Date().toISOString(), activeFrom: new Date().toISOString()});
+  schedulePush(); resetLeagueView();
+  alert(`리그를 만들었어요! 코드: ${code}\n친구에게 이 코드를 알려주세요.`);
+  renderLeagueBox(); renderSchedule().catch(()=>{}); renderHome();
+}
+async function joinLeague(code, quiet){
+  if(!DB_READY){ alert('구글 로그인 후에 참가할 수 있어요.'); return; }
+  code = (code||'').trim().toUpperCase();
+  const L = await fetchLeague(code);
+  if(!L){ alert('그 코드의 리그를 찾지 못했어요.'); return; }
+  const cur = L.members[team];
+  if(cur && cur.uid!==UID && !memberStale(cur)){ alert(`이 리그에서는 ${team}(베이스)을 이미 ${cur.nick||'다른'} 감독이 맡고 있어요.\n베이스 팀이 겹치면 참가할 수 없어요.`); return; }
+  const info = await leagueSeasonInfo(code), from = nextJoinTime(info);
+  const pending = from > Date.now() + 60000;
+  if(!quiet && !confirm(pending ? `리그 ${code}는 지금 정규시즌이 진행 중이에요.\n${new Date(from).toLocaleString()} 개막하는 다음 시즌부터 참가해요. 그 전까지는 지금처럼 개인 리그로 진행돼요.\n참가 예약할까요?` : `리그 ${code}에 참가할까요?\n바로 이 리그 시즌으로 진행돼요. (개인 리그 기록은 보관돼요)`)) return;
+  localStorage.setItem('sn_lgcode_'+ns(), code);
+  LEAGUE = {...L, active: false};
+  await pushMember({joinedAt: new Date().toISOString(), activeFrom: new Date(from).toISOString(), left: false});
+  LEAGUE.active = !pending;
+  schedulePush(); resetLeagueView();
+  if(quiet) alert(pending ? `리그 ${code} 참가 예약 완료! ${new Date(from).toLocaleString()} 다음 시즌부터 함께해요.` : `리그 ${code}에 참가했어요!`);
+  renderLeagueBox(); renderSchedule().catch(()=>{}); renderHome();
+}
+async function leaveLeague(){
+  if(!LEAGUE || !confirm('공유 리그를 나갈까요?\n내 팀은 그 리그에서 AI 팀으로 바뀌고, 나는 개인 리그로 돌아가요.')) return;
+  try{ if(!LEAGUE.gone) await pushMember({left: true}); }catch(e){}
+  localStorage.removeItem('sn_lgcode_'+ns()); LEAGUE = null;
+  schedulePush(); resetLeagueView();
+  renderLeagueBox(); renderSchedule().catch(()=>{}); renderHome();
+}
+function renderLeagueBox(){
+  const box = document.getElementById('leagueBox'); if(!box) return;
+  if(hasClaudeRuntime()){ box.innerHTML = '공유 리그는 GitHub 주소(구글 로그인)에서 이용할 수 있어요.'; return; }
+  if(!DB_READY){ box.innerHTML = '구글 로그인하면 친구와 같은 리그에서 경기할 수 있어요.'; return; }
+  if(!LEAGUE || !LEAGUE.code){
+    box.innerHTML = `지금은 <b>개인 리그</b>예요 (상대 9팀 AI).<div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap">
+      <button class="btn" id="lgCreate" style="padding:7px 14px; font-size:12px">리그 만들기</button>
+      <input id="lgCodeIn" placeholder="리그 코드" maxlength="6" style="width:96px; padding:6px 8px; border:1.5px solid #d8e0ee; border-radius:8px; font-size:12px; text-transform:uppercase">
+      <button class="btn ghost" id="lgJoin" style="padding:7px 14px; font-size:12px">참가</button></div>
+      <div style="font-size:11px; color:var(--sub); margin-top:4px">같은 리그 감독끼리 순위·일정·기록을 함께 써요. 비어 있는 팀은 AI가 맡아요. 베이스 팀은 리그 안에서 겹칠 수 없어요.</div>`;
+    document.getElementById('lgCreate').onclick = ()=>createLeague().catch(e=>alert('리그 만들기 실패: '+(e && e.message || e)));
+    document.getElementById('lgJoin').onclick = ()=>joinLeague(document.getElementById('lgCodeIn').value).catch(e=>alert('참가 실패: '+(e && e.message || e)));
+    return;
+  }
+  if(LEAGUE.gone){
+    box.innerHTML = `리그 <b>${LEAGUE.code}</b>에서 내 팀 자리가 없어졌어요(장기 미접속 후 다른 감독이 이어받았거나 나간 상태). 지금은 개인 리그로 진행돼요.<div style="margin-top:6px"><button class="btn ghost" id="lgClear" style="padding:6px 12px; font-size:12px">확인 (리그 정보 지우기)</button></div>`;
+    document.getElementById('lgClear').onclick = ()=>{ localStorage.removeItem('sn_lgcode_'+ns()); LEAGUE = null; schedulePush(); resetLeagueView(); renderLeagueBox(); renderSchedule().catch(()=>{}); };
+    return;
+  }
+  const me = LEAGUE.members[team] || {}, pend = !inLeague();
+  const rows = TEAMS.map(t=>{ const m = LEAGUE.members[t];
+    let st, who;
+    if(!m || m.left){ st = '<span style="color:var(--sub)">AI</span>'; who = ''; }
+    else { who = `${m.name||t} <span style="color:var(--sub)">· ${m.nick||''}</span>`;
+      st = Date.now() < Date.parse(m.activeFrom||0) ? '<span style="color:#b07a00">다음 시즌 참가</span>' : memberStale(m) ? '<span style="color:#e0312b">장기 미접속 → AI</span>' : `<span style="color:#0a8f5a">참가 중</span>`; }
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #f5f7fa; font-size:12px; ${t===team?'font-weight:800':''}"><span><span style="display:inline-block; width:8px; height:8px; border-radius:4px; background:${TC[t]}; margin-right:5px"></span>${t}${who?` → ${who}`:''}</span>${st}</div>`; }).join('');
+  box.innerHTML = `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">공유 리그 코드 <b style="font-size:16px; letter-spacing:2px">${LEAGUE.code}</b>
+      <button class="btn ghost" id="lgCopy" style="padding:4px 10px; font-size:11px">코드 복사</button>${LEAGUE.root && LEAGUE.root.owner===UID ? '<span style="font-size:11px; color:var(--gold); font-weight:800">방장</span>' : ''}</div>
+    ${pend ? `<div style="margin-top:6px; color:#b07a00; font-weight:800">참가 예약됨 — ${new Date(Date.parse(me.activeFrom)).toLocaleString()} 개막하는 시즌부터 합류해요. 그 전까지는 개인 리그로 진행돼요.</div>` : ''}
+    <div style="margin-top:8px">${rows}</div>
+    <div style="font-size:11px; color:var(--sub); margin-top:6px">다른 감독 팀은 그 감독이 마지막으로 저장한 라인업으로 뛰어요. 2주 이상 접속하지 않은 팀은 AI로 바뀌어요.</div>
+    <button class="btn ghost" id="lgLeave" style="margin-top:8px; padding:6px 12px; font-size:12px">리그 나가기</button>`;
+  document.getElementById('lgCopy').onclick = ()=>{ try{ navigator.clipboard.writeText(LEAGUE.code); }catch(e){} alert('코드를 복사했어요: '+LEAGUE.code); };
+  document.getElementById('lgLeave').onclick = ()=>leaveLeague();
+}
+// 정규시즌 박스스코어는 시즌 문서가 너무 커지지 않게 팀별 문서에 따로 저장
+function stripBoxes(season){ return {...season, results: season.results.map(r=>r && (r.box || r.boxes) ? (({box, boxes, ...x})=>x)(r) : r)}; }
+async function saveLeagueBoxes(season, from, to){
+  const per = {};
+  for(let i=Math.max(0,from); i<=to; i++){ const r = season.results[i]; if(!r || !r.boxes) continue; const g = season.games[i];
+    for(const s in r.boxes){ const t = s==='a' ? g.away : g.home; (per[t] || (per[t] = {}))[i] = r.boxes[s]; }
+    delete r.boxes; }
+  for(const t in per){ const ref = DB.doc(LG('box_'+TEAM_CODE[t])); let d = null;
+    try{ const sn = await ref.get(); d = sn.exists ? sn.data() : null; }catch(e){}
+    if(!d || d.seasonStart!==season.seasonStart) d = {seasonStart: season.seasonStart, list: {}};
+    Object.assign(d.list, per[t]); await ref.set(d); }
+}
+async function lgAttachMyBoxes(season){
+  const sn = await DB.doc(LG('box_'+TEAM_CODE[team])).get(); if(!sn.exists) return;
+  const d = sn.data(); if(!d || d.seasonStart!==season.seasonStart) return;
+  for(const i in (d.list||{})){ const r = season.results[+i]; if(r && !r.box) r.box = d.list[i]; }
+}
+function lgNormalizePS(ps){ for(const k of ['wcGames','jpoGames','poGames','ksGames']) (ps[k]||[]).forEach(r=>{ if(!r) return; const s = r.home===team ? 'h' : r.away===team ? 'a' : null; r.box = (s && r.boxes) ? r.boxes[s] : undefined; }); }
+// 경기 보상·미션은 경기를 계산한 기기와 상관없이 각 감독 기기에서 한 번씩 반영
+function lgCreditGames(season, ps){
+  let st = {}; try{ st = JSON.parse(localStorage.getItem('sn_lgcredit_'+ns())||'{}')||{}; }catch(e){}
+  if(st.s !== season.seasonStart) st = {s: season.seasonStart, ids: []};
+  const done = new Set(st.ids); let n = 0;
+  const af = Date.parse((LEAGUE && LEAGUE.members[team] || {}).activeFrom || 0) || 0; // 참가 전 경기(AI가 대신 뛴 경기)는 제외
+  const give = (id, my, op, cash, r, dk, at) => { if(done.has(id) || (at && +new Date(at) < af)) return; done.add(id); addCurrency(cash); msGame(r, {my, op}, dk, id); n++; };
+  const pre = season.preseason;
+  if(pre) for(let i=0;i<=pre.lastSimIdx;i++){ const g = pre.games[i], r = pre.results[i]; if(!r || !(g.home===team||g.away===team)) continue;
+    const my = g.home===team ? r.scoreHome : r.scoreAway, op = g.home===team ? r.scoreAway : r.scoreHome;
+    give(season.seasonStart+'|p'+i, my, op, my>op?PRESEASON_REWARD.win:(my===op?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss), r, gameDayKey(pre.dates[i]), pre.dates[i]); }
+  for(let i=0;i<=season.lastSimIdx;i++){ const g = season.games[i], r = season.results[i]; if(!r || !(g.home===team||g.away===team) || !r.box) continue; // 박스스코어가 올라온 뒤에 반영(활약 보너스 계산)
+    const my = g.home===team ? r.scoreHome : r.scoreAway, op = g.home===team ? r.scoreAway : r.scoreHome;
+    give(season.seasonStart+'|r'+i, my, op, (my>op?GAME_REWARD.win:(my===op?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r), r, gameDayKey(slotIndexToDate(season.seasonStart, i)), slotIndexToDate(season.seasonStart, i)); }
+  if(ps) for(const k of ['wcGames','jpoGames','poGames','ksGames']) (ps[k]||[]).forEach((r,i)=>{ if(!r || !(r.home===team||r.away===team)) return;
+    const my = r.home===team ? r.scoreHome : r.scoreAway, op = r.home===team ? r.scoreAway : r.scoreHome;
+    if(!done.has('ps|'+k+i)){ try{ const o = loadMS(); if(!o.w.c.ps){ for(const p of ['w','m']) o[p].c.ps = 1; saveMS(o); } }catch(e){} }
+    give('ps|'+k+i, my, op, (my>op?300:150) + perfBonus(r), r, todayDayKey()); });
+  st.ids = [...done];
+  try{ localStorage.setItem('sn_lgcredit_'+ns(), JSON.stringify(st)); }catch(e){}
+  if(n){ refreshCurrencyDisplay(); schedulePush(); }
+}
+function lgCreditSeasonRewards(list){
+  let done = []; try{ done = JSON.parse(localStorage.getItem('sn_lgsrw_'+ns())||'[]')||[]; }catch(e){}
+  let changed = false;
+  for(const e of (list||[])){
+    if(!e || !e.league || !e.ranks || done.includes(e.seasonStart) || !(e.humans||[]).includes(team)) continue;
+    done.push(e.seasonStart); changed = true;
+    const rank = e.ranks.indexOf(team)+1; if(rank<=0) continue;
+    let cash = RANK_REWARD[Math.min(9, rank-1)] || 500, tickets = 0; const lines = [`정규시즌 ${rank}위 보상 ${cash.toLocaleString()}냥`];
+    const owned = loadOwned();
+    for(const [k,l] of AWARD_LABELS){ const a = e.awards && e.awards[k]; if(!a) continue;
+      const mine = a.ht ? a.ht===team : !!CARDS.find(x=>x.name===a.name && x.team===a.team && owned.has(pkey(x)));
+      if(mine){ cash += 1000; lines.push(`내 선수 ${a.name} ${l} 수상 +1,000냥`); if(k==='mvp'){ tickets += 2; lines.push('MVP 보유 보너스 뽑기권 2장'); } } }
+    addCurrency(cash); if(tickets) addTickets(tickets);
+    try{ const msgs = JSON.parse(localStorage.getItem('sn_notices_'+ns())||'[]'); msgs.unshift({at:new Date().toISOString(), text:`🏁 지난 리그 시즌 보상: 총 ${cash.toLocaleString()}냥${tickets?` + 뽑기권 ${tickets}장`:''}`, detail: lines}); localStorage.setItem('sn_notices_'+ns(), JSON.stringify(msgs.slice(0,10))); }catch(_){}
+  }
+  if(changed){ try{ localStorage.setItem('sn_lgsrw_'+ns(), JSON.stringify(done.slice(-60))); }catch(e){} schedulePush(); }
+}
+
 // ===== 화폐 =====
 function getCurrency(){
   const raw = localStorage.getItem('sn_currency_'+ns()+'_'+team);
@@ -700,7 +920,7 @@ function refreshCurrencyDisplay(){
 function getNickname(){ return localStorage.getItem('sn_nickname') || ''; }
 // 내가 정한 구단명(베이스 팀 자리를 대신함). 없으면 베이스 팀 이름
 function myTeamName(){ return localStorage.getItem('sn_teamname_'+ns()) || team; }
-function TN(t){ return t===team ? myTeamName() : t; }
+function TN(t){ if(t===team) return myTeamName(); if(inLeague() && LEAGUE.members[t] && isHuman(t)) return LEAGUE.members[t].name || t; return t; }
 function setNickname(n){ localStorage.setItem('sn_nickname', n); schedulePush(); }
 function hideNicknameGate(){ const g = document.getElementById('nicknameGate'); if(g) g.classList.remove('active'); }
 function showNicknameGateIfNeeded(){
@@ -907,11 +1127,26 @@ function statOf(c, key){ const s = c.stats.find(x=>x[0]===key); return s?s[1]:50
 // ===== 게임 내 시즌 성적(누적) =====
 // ===== 개인 리그: 시즌·기록·포스트시즌·우승 히스토리는 닉네임(유저)별로 따로 진행 =====
 function LK(k){ // 로컬 저장 키(닉네임별). 예전 공용 키가 있으면 처음 한 번 이 닉네임으로 옮김
-  const nk = k+'_'+ns();
+  const nk = k+'_'+ns()+(inLeague() ? '_L'+LEAGUE.code : '');
   try{ if(localStorage.getItem(nk)===null && localStorage.getItem(k)!==null){ localStorage.setItem(nk, localStorage.getItem(k)); localStorage.removeItem(k); } }catch(e){}
   return nk;
 }
-function LG(name){ return 'data/users/'+UID+'/lg_'+name+'_'+encodeURIComponent(ns()); } // 클라우드 경로(내 계정 안, 닉네임별)
+function LG(name){ return inLeague() ? 'leagues/'+LEAGUE.code+'/d/'+name : 'data/users/'+UID+'/lg_'+name+'_'+encodeURIComponent(ns()); } // 클라우드 경로(공유 리그면 리그 공용, 아니면 내 계정·닉네임별)
+// ===== 공유 리그: 사람 팀 판별 · 기록 키 =====
+function leagueCode(){ try{ return localStorage.getItem('sn_lgcode_'+ns()) || ''; }catch(e){ return ''; } }
+function inLeague(){ return !!(LEAGUE && LEAGUE.active && LEAGUE.code); }
+const LG_IDLE_MS = 14*86400000; // 2주 미접속이면 AI로 전환
+function isHuman(t, at){
+  if(t===team) return true;
+  if(!inLeague()) return false;
+  const m = LEAGUE.members[t]; if(!m || m.left || !m.snap) return false;
+  at = at || Date.now();
+  if(at < Date.parse(m.activeFrom||0)) return false;
+  return at - (m.lastSeenMs||0) <= LG_IDLE_MS;
+}
+function hpre(t, at){ return isHuman(t, at) ? (inLeague() ? 'U'+t+'#' : 'U#') : ''; }
+function myPre(){ return inLeague() ? 'U'+team+'#' : 'U#'; }
+function gkParse(k){ const m = /^U([^#]*)#(.*)$/.exec(k); return m ? {human:true, ht: m[1]||team, pk:m[2]} : {human:false, ht:null, pk:k}; }
 function loadGameStats(){
   try{ return JSON.parse(localStorage.getItem(LK('sn_gamestats'))||'{}'); }catch(e){ return {}; }
 }
@@ -963,7 +1198,7 @@ function addResultBadge(r){
   if(r.type==='dupe') return `<div style="font-size:11px; margin-top:4px; font-weight:800; color:#ffe08a">겹치기 ${r.n}/${DUPE_MAX} · 전 능력치 +${r.bonus}</div>`;
   return `<div style="font-size:11px; margin-top:4px; font-weight:800; color:#ffe08a">겹치기 완성 카드 → ${r.amt.toLocaleString()}냥 환급</div>`;
 }
-function gsk(c, mine){ return (mine?'U#':'')+pkey(c); }
+function gsk(c, p){ return (p===true ? 'U#' : (p||''))+pkey(c); } // p: 기록 키 앞머리(사람 팀이면 U#/U팀#)
 function tallyPlay(batter, pitcher, outcome, runs, bU, pU){
   if(NO_TALLY) return; // 시범경기는 시즌 기록에 반영하지 않음
   const bk = gsk(batter, bU);
@@ -981,8 +1216,8 @@ function tallyPlay(batter, pitcher, outcome, runs, bU, pU){
 }
 function gameStatLine(c, ctx){
   const isB = c.pos==='타자';
-  const mine = ctx==='mine' || (ctx!=='ai' && typeof c==='object' && loadOwned().has(pkey(c)));
-  const key = gsk(c, mine);
+  const pre = ctx==='ai' ? '' : (typeof ctx==='string' && ctx[0]==='U') ? ctx : (ctx==='mine' || (typeof c==='object' && loadOwned().has(pkey(c)))) ? myPre() : '';
+  const key = pre + pkey(c);
   if(isB){
     const s = GS[key];
     if(!s || s.pa===0) return {g:0, avg:0, ab:0, h:0, hr:0, rbi:0, sb:0};
@@ -1127,14 +1362,14 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
   opts = opts || {};
   const dk = opts.dayKey || SIM_CTX.dayKey || todayDayKey();
   const rot = opts.rot || 0;
-  const tactic = name => name===team && opts.userTactics ? opts.userTactics : TACTIC_DEFAULT;
+  const tactic = name => (opts.tacticsFor && opts.tacticsFor(name)) || (name===team && opts.userTactics ? opts.userTactics : TACTIC_DEFAULT);
   const prep = (name, lu, st) => {
     const tc = tactic(name);
     const starters = (st.starters||[]).filter(Boolean);
     const starter = starters.length ? starters[rot % starters.length] : null; // 5인 로테이션
     const T = normTactics(tc);
     return {name, lineup: lu.map(c=>applyCond(c, dk)), starter: applyCond(starter, dk), starters: st.starters, middle: st.middle, setup: st.setup, closer: st.closer,
-      hook: 8 - T.sp*0.3, rpMax: Math.round(9 - T.rp*0.6), tac: T, bench: (name===team && opts.userBench ? opts.userBench.map(c=>applyCond(c, dk)) : []), phUsed: new Set()};
+      hook: 8 - T.sp*0.3, rpMax: Math.round(9 - T.rp*0.6), tac: T, bench: ((opts.benchFor ? opts.benchFor(name) : (name===team ? opts.userBench : null)) || []).map(c=>applyCond(c, dk)), phUsed: new Set()};
   };
   const away = prep(awayName, awayLineup, awayStaff), home = prep(homeName, homeLineup, homeStaff);
   let score={away:0,home:0}; let idx={away:0,home:0};
@@ -1163,7 +1398,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
         } }
       if(pitcher !== pitchingStaff.starter) pitcher = applyFatigue(pitchingStaff.name, applyCond(pitcher, dk));
       const pk = pkey(pitcher);
-      const pU = pitchingStaff.name===team, bU = battingTeam.name===team, gpk = (pU?'U#':'')+pk;
+      const pU = hpre(pitchingStaff.name, SIM_CTX.at), bU = hpre(battingTeam.name, SIM_CTX.at), gpk = pU+pk;
       if(!appeared[fieldSide].has(pk)){ appeared[fieldSide].add(pk); if(!NO_TALLY){ const p = GS[gpk] || (GS[gpk]={g:0,outs:0,runs:0,so:0,bb:0}); p.g++; } }
       const pb = pbox[fieldSide][pk] || (pbox[fieldSide][pk] = {n:pitcher.name, outs:0, r:0, so:0, h:0});
       { const A = apps[fieldSide], last = A[A.length-1], lead = score[fieldSide]-score[side];
@@ -1247,8 +1482,8 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
   }
   for(const k in dec){ const [s, pk] = [k.slice(0,k.indexOf('#')), k.slice(k.indexOf('#')+1)];
     if(pbox[s][pk]) pbox[s][pk].d = dec[k];
-    if(!NO_TALLY){ const sn = s==='away'?awayName:homeName, gk2 = (sn===team?'U#':'')+pk; const p = GS[gk2] || (GS[gk2]={g:0,outs:0,runs:0,so:0,bb:0}); const f = {W:'w',L:'l',SV:'sv',HLD:'hld'}[dec[k]]; p[f] = (p[f]||0)+1; } }
-  if(!NO_TALLY) for(const T of [away, home]) new Set(T.lineup.filter(Boolean).map(c=>gsk(c, T.name===team))).forEach(bk=>{ const b = GS[bk] || (GS[bk]={pa:0,ab:0,h:0,hr:0,rbi:0}); b.g = (b.g||0)+1; });
+    if(!NO_TALLY){ const sn = s==='away'?awayName:homeName, gk2 = hpre(sn, SIM_CTX.at)+pk; const p = GS[gk2] || (GS[gk2]={g:0,outs:0,runs:0,so:0,bb:0}); const f = {W:'w',L:'l',SV:'sv',HLD:'hld'}[dec[k]]; p[f] = (p[f]||0)+1; } }
+  if(!NO_TALLY) for(const T of [away, home]) new Set(T.lineup.filter(Boolean).map(c=>gsk(c, hpre(T.name, SIM_CTX.at)))).forEach(bk=>{ const b = GS[bk] || (GS[bk]={pa:0,ab:0,h:0,hr:0,rbi:0}); b.g = (b.g||0)+1; });
   // 불펜 피로 갱신(선발 제외)
   for(const side of ['away','home']){
     const T = side==='away'?away:home;
@@ -1266,7 +1501,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 62; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 63; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1329,9 +1564,9 @@ function catchUpPreseason(season){
   try{
     for(let i=ps.lastSimIdx+1; i<=target; i++){
       const g = ps.games[i];
-      const r = simSeasonGame(g, {slot: Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(ps.dates[i])});
+      const r = simSeasonGame(g, {slot: Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(ps.dates[i]), at: ps.dates[i]});
       ps.results[i] = r;
-      if(g.home===team || g.away===team){
+      if(!inLeague() && (g.home===team || g.away===team)){
         const my = g.home===team? r.scoreHome : r.scoreAway, opp = g.home===team? r.scoreAway : r.scoreHome;
         addCurrency(my>opp?PRESEASON_REWARD.win:(my===opp?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss)); msGame(r, {my, op:opp}, gameDayKey(ps.dates[i]), season.seasonStart+'|p'+i);
       }
@@ -1396,21 +1631,29 @@ function lineupFor(t){
 // ctx: {slot, dayKey, rot, box}  — slot: 피로 계산용 연속 경기 번호, rot: 선발 로테이션 순번, box: 내 팀 박스스코어 저장
 function simSeasonGame(g, ctx){
   ctx = ctx || {};
-  SIM_CTX = {slot: ctx.slot||0, dayKey: ctx.dayKey || todayDayKey()};
+  const at = ctx.at ? +new Date(ctx.at) : Date.now();
+  SIM_CTX = {slot: ctx.slot||0, dayKey: ctx.dayKey || todayDayKey(), at};
   const log = [];
   let userBench = [];
   if(g.home===team || g.away===team){ try{ const own = loadOwned(); userBench = [...loadBench()].filter(k=>own.has(k)).map(k=>CARDS.find(c=>pkey(c)===k)).filter(c=>c && c.pos==='타자').map(c=>typeof boostedCard==='function'?boostedCard(c):c); }catch(e){} }
-  const r = simGame(g.away, g.home, lineupFor(g.away), lineupFor(g.home), staffFor(g.away), staffFor(g.home), log, {dayKey: SIM_CTX.dayKey, rot: ctx.rot||0, userTactics: loadTactics(), userBench});
+  const tacFor = t => t===team ? loadTactics() : (inLeague() && isHuman(t, at) ? (snapOf(t)||{}).tactics : null);
+  const benchFor = t => t===team ? userBench : (inLeague() && isHuman(t, at) ? snapBench(t) : []);
+  const r = simGame(g.away, g.home, lineupFor(g.away), lineupFor(g.home), staffFor(g.away), staffFor(g.home), log, {dayKey: SIM_CTX.dayKey, rot: ctx.rot||0, tacticsFor: tacFor, benchFor});
   const out = {scoreAway:r.score.away, scoreHome:r.score.home, highlights:r.highlights};
-  if(ctx.box && (g.home===team || g.away===team)){
-    const mySide = g.home===team ? 'h' : 'a';
-    const ip = o => Math.floor(o/3)+'.'+(o%3);
-    out.box = { ls:{a:r.linescore.away, h:r.linescore.home}, h:{a:r.hits.away, h:r.hits.home}, e:{a:r.errors.away, h:r.errors.home},
-      plays: r.plays.slice(0,15), side: mySide,
-      bat: Object.values(mySide==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
-      pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) } };
-    out.box.pk = SIM_CTX.dayKey+'|'+(ctx.slot||0)+'|'+g.away+'@'+g.home;
-    pbpSave(out.box.pk, log);
+  if(ctx.box){
+    const sides = []; if(isHuman(g.away, at)) sides.push('a'); if(isHuman(g.home, at)) sides.push('h');
+    if(sides.length){
+      const ip = o => Math.floor(o/3)+'.'+(o%3);
+      const pk = SIM_CTX.dayKey+'|'+(ctx.slot||0)+'|'+g.away+'@'+g.home;
+      const mk = side => ({ ls:{a:r.linescore.away, h:r.linescore.home}, h:{a:r.hits.away, h:r.hits.home}, e:{a:r.errors.away, h:r.errors.home},
+        plays: r.plays.slice(0,15), side,
+        bat: Object.values(side==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
+        pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) }, pk });
+      const ms = g.home===team ? 'h' : g.away===team ? 'a' : null;
+      if(ms) pbpSave(pk, log);
+      if(inLeague()){ out.boxes = {}; sides.forEach(s=>{ out.boxes[s] = mk(s); }); if(ms) out.box = out.boxes[ms]; }
+      else if(ms) out.box = mk(ms);
+    }
   }
   return out;
 }
@@ -1420,10 +1663,10 @@ function catchUpSeason(season){
   let changed = catchUpPreseason(season);
   for(let i=season.lastSimIdx+1; i<=target; i++){
     FAT = season.fat || (season.fat = {});
-    const r = simSeasonGame(season.games[i], {slot: 10000+Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(slotIndexToDate(season.seasonStart, i)), box: true});
+    const r = simSeasonGame(season.games[i], {slot: 10000+Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(slotIndexToDate(season.seasonStart, i)), box: true, at: slotIndexToDate(season.seasonStart, i)});
     season.results[i] = r;
     const g = season.games[i];
-    if(g.home===team || g.away===team){
+    if(!inLeague() && (g.home===team || g.away===team)){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
       addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, gameDayKey(slotIndexToDate(season.seasonStart, i)), season.seasonStart+'|r'+i);
@@ -1466,10 +1709,10 @@ function fixMyGS(season){
       const g = season.games[i], r = season.results[i];
       if(!r || !r.box || !(g.home===team || g.away===team)) continue;
       const bx = r.box, side = bx.side;
-      for(const b of (bx.bat||[])){ const c = byName(b.n, true); if(!c) continue; const k = 'U#'+pkey(c);
+      for(const b of (bx.bat||[])){ const c = byName(b.n, true); if(!c) continue; const k = myPre()+pkey(c);
         const s = B[k] || (B[k] = {g:0, pa:0, ab:0, h:0, hr:0, rbi:0, sb:0});
         s.g++; s.ab += b.ab||0; s.pa += (b.ab||0)+(b.bb||0); s.h += b.h||0; s.hr += b.hr||0; s.rbi += b.rbi||0; s.sb += b.sb||0; }
-      for(const p of ((bx.pit||{})[side]||[])){ const c = byName(p.n, false); if(!c) continue; const k = 'U#'+pkey(c);
+      for(const p of ((bx.pit||{})[side]||[])){ const c = byName(p.n, false); if(!c) continue; const k = myPre()+pkey(c);
         const s = P[k] || (P[k] = {g:0, outs:0, runs:0, so:0, w:0, l:0, hld:0, sv:0});
         const [ip, fr] = String(p.ip||'0.0').split('.'); s.g++; s.outs += (+ip||0)*3 + (+fr||0); s.runs += p.r||0; s.so += p.so||0;
         if(p.d==='W') s.w++; else if(p.d==='L') s.l++; else if(p.d==='HLD') s.hld++; else if(p.d==='SV') s.sv++; }
@@ -1575,7 +1818,7 @@ function renderStandingsPanes(){
     const gp = Math.max(1, Math.round((season.lastSimIdx+1)*2/TEAMS.length)); // 팀당 소화 경기 수
     const minPA = Math.max(10, Math.round(gp*2.0)), minIP = Math.max(5, Math.round(gp*0.5));
     const B = [], P = [];
-    for(const k in GS){ const mine = k.startsWith('U#'), c = cardByKey(mine ? k.slice(2) : k); if(!c) continue; const s = gameStatLine(c, mine?'mine':'ai'), tl = mine ? myTeamName() : c.team;
+    for(const k in GS){ const G = gkParse(k), mine = G.human && G.ht===team, c = cardByKey(G.pk); if(!c) continue; const s = gameStatLine(c, G.human ? (inLeague() ? 'U'+G.ht+'#' : 'U#') : 'ai'), tl = G.human ? TN(G.ht) : c.team;
       if(c.pos==='타자'){ if((s.pa||0)>0) B.push({c, mine, tl, ...s}); } else if((s.ip||0)>0) P.push({c, mine, tl, ...s, outs:(GS[k]||{}).outs||0}); }
     const cats = {'타율':{src:B, key:'avg', fmt:v=>v.toFixed(3), filter:x=>x.pa>=minPA, note:`규정타석 ${minPA}`},
                   '홈런':{src:B, key:'hr', fmt:v=>v}, '타점':{src:B, key:'rbi', fmt:v=>v}, '안타':{src:B, key:'h', fmt:v=>v}, '도루':{src:B, key:'sb', fmt:v=>v},
@@ -1702,11 +1945,11 @@ function computeAwards(gs, gpt){
   gpt = Math.max(1, gpt||108);
   const minPA = Math.max(10, Math.round(gpt*2.0)), minOuts = Math.max(5, Math.round(gpt*0.5))*3;
   const bats = [], pits = [];
-  for(const k in gs){ const s = gs[k], mine = k.startsWith('U#'), c = cardByKey(mine ? k.slice(2) : k); if(!c) continue;
-    if(c.pos==='타자'){ if(s.pa) bats.push({c, mine, pa:s.pa, ab:s.ab, h:s.h, hr:s.hr, rbi:s.rbi, sb:s.sb||0, avg: s.ab ? s.h/s.ab : 0}); }
-    else if(s.outs) pits.push({c, mine, outs:s.outs, so:s.so, runs:s.runs, era: s.runs*27/s.outs}); }
+  for(const k in gs){ const s = gs[k], G = gkParse(k), mine = G.human && G.ht===team, ht = G.human ? G.ht : null, c = cardByKey(G.pk); if(!c) continue;
+    if(c.pos==='타자'){ if(s.pa) bats.push({c, mine, ht, pa:s.pa, ab:s.ab, h:s.h, hr:s.hr, rbi:s.rbi, sb:s.sb||0, avg: s.ab ? s.h/s.ab : 0}); }
+    else if(s.outs) pits.push({c, mine, ht, outs:s.outs, so:s.so, runs:s.runs, era: s.runs*27/s.outs}); }
   const top = (arr, f, asc, filt) => arr.filter(filt||(()=>true)).sort((x,y)=> asc ? f(x)-f(y) : f(y)-f(x))[0] || null;
-  const P = (x, v) => x ? {name:x.c.name, team: x.mine ? myTeamName() : x.c.team, mine: !!x.mine, v} : null;
+  const P = (x, v) => x ? {name:x.c.name, team: x.ht ? TN(x.ht) : x.c.team, mine: !!x.mine, ht: x.ht||null, v} : null;
   const mvp = top(bats, x=>x.hr*4 + x.rbi*1.5 + x.h + x.sb*0.5);
   const ace = top(pits, x=>x.so*0.6 + x.outs/3*0.8 - x.runs*1.5);
   const avg = top(bats, x=>x.avg, false, x=>x.pa>=minPA), hr = top(bats, x=>x.hr), rbi = top(bats, x=>x.rbi), sb = top(bats, x=>x.sb);
@@ -1923,7 +2166,9 @@ function aiBalance(){
   let d = {bat:0, pit:0};
   try{
     const lu = lineupFor(team), st = staffFor(team), b = aiBase();
-    const myBat = avgAllStats(lu), myPit = avgAllStats([...st.starters, ...st.middle, ...st.setup, ...st.closer]);
+    let myBat = avgAllStats(lu), myPit = avgAllStats([...st.starters, ...st.middle, ...st.setup, ...st.closer]);
+    if(inLeague()){ const H = Object.keys(LEAGUE.members).filter(t=>t!==team && isHuman(t) && snapOf(t) && snapOf(t).str);
+      if(H.length){ myBat = (myBat + H.reduce((s,t)=>s+snapOf(t).str.bat,0))/(H.length+1); myPit = (myPit + H.reduce((s,t)=>s+snapOf(t).str.pit,0))/(H.length+1); } }
     const cl = v => Math.max(-AI_MAX_DOWN, v); // 양방향: 내 팀이 약하면 AI도 내 수준 쪽으로 내려옴(최대 -25)
     d = {bat: cl((myBat - b.bat) * AI_CATCHUP), pit: cl((myPit - b.pit) * AI_CATCHUP), myBat, myPit, aiBat: b.bat, aiPit: b.pit};
   }catch(e){}
@@ -2297,13 +2542,14 @@ async function catchUpSeasonShared(){
   const gsSnap = await gsRef.get();
   GS = gsSnap.exists ? gsSnap.data() : {};
   const target2 = currentSlotIndex(season);
+  const from = season.lastSimIdx+1;
   let changed = catchUpPreseason(season);
   for(let i=season.lastSimIdx+1; i<=target2; i++){
     FAT = season.fat || (season.fat = {});
-    const r = simSeasonGame(season.games[i], {slot: 10000+Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(slotIndexToDate(season.seasonStart, i)), box: true});
+    const r = simSeasonGame(season.games[i], {slot: 10000+Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(slotIndexToDate(season.seasonStart, i)), box: true, at: slotIndexToDate(season.seasonStart, i)});
     season.results[i] = r;
     const g = season.games[i];
-    if(g.home===team || g.away===team){
+    if(!inLeague() && (g.home===team || g.away===team)){
       const myScore = g.home===team? r.scoreHome : r.scoreAway;
       const oppScore = g.home===team? r.scoreAway : r.scoreHome;
       addCurrency((myScore>oppScore?GAME_REWARD.win:(myScore===oppScore?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, gameDayKey(slotIndexToDate(season.seasonStart, i)), season.seasonStart+'|r'+i);
@@ -2311,7 +2557,7 @@ async function catchUpSeasonShared(){
     changed=true;
   }
   if(target2>season.lastSimIdx) season.lastSimIdx = target2;
-  if(changed){ season.build = Math.max(season.build||0, APP_BUILD); fixMyGS(season); await ref.set(season); await gsRef.set(GS); }
+  if(changed){ season.build = Math.max(season.build||0, APP_BUILD); if(inLeague()) await saveLeagueBoxes(season, from, target2); fixMyGS(season); await ref.set(inLeague() ? stripBoxes(season) : season); await gsRef.set(GS); }
   saveGameStats(GS);
   return season;
 }
@@ -2339,7 +2585,7 @@ async function getSharedPostseason(season){
   while(ps.stage!=='DONE'){
     const gDate = postseasonSlotDate(season.seasonStart, idx);
     if(gDate > now) break;
-    PS_CTX = {slot: 20000+idx, rot: idx, dayKey: dayKey(gDate), box: true};
+    PS_CTX = {slot: 20000+idx, rot: idx, dayKey: dayKey(gDate), box: true, at: gDate};
     advancePostseason(ps); ps.simIdx = idx+1;
     if(ps.stage==='DONE') ps.doneAt = gDate.toISOString();
     idx++; changed=true;
@@ -2384,7 +2630,7 @@ function simSeriesGame(home, away){
   let tries=0;
   while(r.scoreHome===r.scoreAway && tries<5){ r = simSeasonGame({home, away}, c); tries++; } // 12회까지 동점이면 재경기 처리
   r.home = home; r.away = away;
-  if(home===team || away===team){
+  if(!inLeague() && (home===team || away===team)){
     const myScore = home===team? r.scoreHome : r.scoreAway;
     const oppScore = home===team? r.scoreAway : r.scoreHome;
     addCurrency((myScore>oppScore?300:150) + perfBonus(r)); msGame(r, {my:myScore, op:oppScore}, c.dayKey, 'ps|'+c.dayKey+'|'+c.slot); try{ const o = loadMS(); if(!o.w.c.ps){ for(const p of ['w','m']) o[p].c.ps = 1; saveMS(o); } }catch(e){}
@@ -2443,7 +2689,7 @@ function catchUpPostseason(season){
   while(ps.stage!=='DONE'){
     const gDate = postseasonSlotDate(season.seasonStart, idx);
     if(gDate > now) break;
-    PS_CTX = {slot: 20000+idx, rot: idx, dayKey: dayKey(gDate), box: true};
+    PS_CTX = {slot: 20000+idx, rot: idx, dayKey: dayKey(gDate), box: true, at: gDate};
     advancePostseason(ps); ps.simIdx = idx+1;
     if(ps.stage==='DONE') ps.doneAt = gDate.toISOString();
     idx++;
@@ -2471,6 +2717,7 @@ async function renderSchedule(){
   try{ if(CLOUD_INIT) await Promise.race([CLOUD_INIT, new Promise(r=>setTimeout(r, 10000))]); }catch(e){}
   let season, sharedOk = DB_READY;
   if(DB_READY){
+    if(LEAGUE && LEAGUE.code && !LEAGUE.gone && !inLeague() && Date.now() >= Date.parse((LEAGUE.members[team]||{}).activeFrom||0)){ try{ await loadLeague(); GS = loadGameStats(); }catch(e){} } // 다음 시즌 참가 예약 → 시작 시각이 되면 합류
     try{ season = await catchUpSeasonShared(); }
     catch(e){
       try{ await new Promise(r=>setTimeout(r,1500)); season = await catchUpSeasonShared(); } // 한 번 더 시도
@@ -2524,11 +2771,12 @@ async function renderSchedule(){
     } else {
       ps = catchUpPostseason(season);
     }
+    if(inLeague()) lgNormalizePS(ps);
     renderPostseason(ps); LAST_PS = ps;
     if(ps.stage==='DONE'){
       const entry = {seasonStart: season.seasonStart, champion: ps.champion, pennant: computeStandings(season)[0].team};
       creditTitles([entry]);
-      try{ if(DB_READY && sharedOk){ const hs = await DB.doc(LG('history')).get(); creditTitles((hs.exists && hs.data().list) || []); } else creditTitles(JSON.parse(localStorage.getItem(LK('sn_league_history'))||'[]')); }catch(e){}
+      try{ if(DB_READY && sharedOk){ const hs = await DB.doc(LG('history')).get(); creditTitles((hs.exists && hs.data().list) || []); if(inLeague()) lgCreditSeasonRewards((hs.exists && hs.data().list) || []); } else creditTitles(JSON.parse(localStorage.getItem(LK('sn_league_history'))||'[]')); }catch(e){}
       const doneAt = ps.doneAt ? new Date(ps.doneAt) : postseasonSlotDate(season.seasonStart, 18);
       const nextAt = nextSeasonStartAfter(doneAt);
       if(new Date() >= nextAt && !ROLLOVER_TRIED){ ROLLOVER_TRIED = true; await startNewSeason(DB_READY && sharedOk); return renderSchedule(); }
@@ -2537,6 +2785,8 @@ async function renderSchedule(){
   } else {
     document.getElementById('postseasonBox').style.display='none';
   }
+  if(inLeague() && sharedOk){ try{ await lgAttachMyBoxes(season); lgCreditGames(season, LAST_PS); }catch(e){}
+    try{ const hs = await DB.doc(LG('history')).get(); const hl = (hs.exists && hs.data().list) || []; creditTitles(hl); lgCreditSeasonRewards(hl); }catch(e){} } // 시즌이 넘어간 뒤 접속해도 지난 시즌 보상·우승 기록을 받음
   LAST_SEASON = season; if(fixMyGS(season)) saveGameStats(GS); try{ localStorage.setItem(LK('sn_seasonstart'), season.seasonStart); }catch(e){} renderCalendar(); try{ renderNextOpponent(); }catch(e){} try{ renderDaily(); renderNotices(); }catch(e){}
   pushRanking();
 }
@@ -2549,8 +2799,9 @@ async function startNewSeason(shared){
     if(!oldSeason || !ps || !ps.champion) return;
     let gs = GS; if(shared){ try{ const g2 = await DB.doc(LG('gamestats')).get(); gs = g2.exists ? (g2.data()||{}) : {}; }catch(e){} }
     const stRows = computeStandings(oldSeason), meRow = stRows.find(r=>r.team===team);
-    const entry = {seasonStart: oldSeason.seasonStart, champion: ps.champion, pennant: stRows[0].team, awards: computeAwards(gs, GAMES_PER_TEAM), my: meRow ? {team, rank: meRow.rank, w: meRow.w, t: meRow.t, l: meRow.l} : null};
-    if(shared){ const ref = DB.doc(LG('history')); const hs = await ref.get(); const list = (hs.exists && hs.data().list) || []; if(!list.some(x=>x.seasonStart===entry.seasonStart)){ list.push(entry); await ref.set({list: list.slice(-60)}); grantSeasonRewards(oldSeason, entry); } }
+    const entry = {seasonStart: oldSeason.seasonStart, champion: ps.champion, pennant: stRows[0].team, awards: computeAwards(gs, GAMES_PER_TEAM), my: meRow ? {team, rank: meRow.rank, w: meRow.w, t: meRow.t, l: meRow.l} : null,
+      ranks: stRows.map(r=>r.team), league: inLeague() || undefined, humans: inLeague() ? Object.keys(LEAGUE.members).filter(t=>isHuman(t, Date.parse(oldSeason.seasonStart)+3600000)) : undefined, names: inLeague() ? Object.fromEntries(TEAMS.map(t=>[t, TN(t)])) : undefined};
+    if(shared){ const ref = DB.doc(LG('history')); const hs = await ref.get(); const list = (hs.exists && hs.data().list) || []; if(!list.some(x=>x.seasonStart===entry.seasonStart)){ list.push(entry); await ref.set({list: list.slice(-60)}); if(!inLeague()) grantSeasonRewards(oldSeason, entry); } }
     else { const list = JSON.parse(localStorage.getItem(LK('sn_league_history'))||'[]'); if(!list.some(x=>x.seasonStart===entry.seasonStart)){ list.push(entry); localStorage.setItem(LK('sn_league_history'), JSON.stringify(list.slice(-60))); grantSeasonRewards(oldSeason, entry); } }
   };
   if(shared){
@@ -3154,7 +3405,7 @@ function statRowsHTML(c, color){
 // 스킬블록·유학 보너스와 팀컬러는 내 팀 경기에서, 내가 보유한 카드에만 적용 (AI 팀의 같은 선수에게는 적용 안 됨)
 lineupFor = function(t){
   const base = _lineupForBase(t);
-  if(t!==team){ const k = aiBalance().bat; return k ? base.map(c=>addAllStats(c,k)) : base; }
+  if(t!==team){ const sl = snapLineup(t); if(sl) return sl; const k = aiBalance().bat; return k ? base.map(c=>addAllStats(c,k)) : base; }
   const owned = loadOwned(), tc = teamColorInfo();
   const custom = (loadLineupObjs()||[]).filter(Boolean).length===9; // 직접 짠 타순일 때만 포지션 적용
   const pos = custom ? loadLineupPos() : null;
@@ -3165,6 +3416,7 @@ function penalizeIfMisplacedStarter(c, cat){
   return {...c, stats: c.stats.map(([l,v])=>[l, Math.max(1, Math.round(v*0.85))])};
 }
 staffFor = function(t){
+  if(t!==team){ const ss = snapStaff(t); if(ss) return ss; }
   const s = _staffForBase(t);
   const mine = t===team;
   const owned = mine ? loadOwned() : null, tc = mine ? teamColorInfo() : null;
