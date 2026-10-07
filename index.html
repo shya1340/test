@@ -551,7 +551,7 @@ function showSetupPage(){
   document.getElementById('setupSub').textContent = locked ? `베이스 팀(${locked})은 그대로이고, 구단 이름만 정하면 돼요` : '감독 이름과 구단 이름을 정하고 베이스 팀을 골라주세요';
   const grid = document.getElementById('setupGrid');
   const taken = SETUP_TAKEN || {};
-  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled ${t===SETUP_TEAM?'setupSel':''} ${(locked && t!==locked) || (!locked && taken[t])?'locked':''}" data-team="${t}" title="${taken[t]?'이미 다른 감독이 맡은 팀':''}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
+  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled ${t===SETUP_TEAM?'setupSel':''} ${(locked && t!==locked) || (!locked && taken[t])?'locked':''}" data-team="${t}" title="${taken[t]?'이미 다른 감독이 맡은 팀':''}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div><div class="ps" style="font-size:10px">${TEAM_SUB[t]||''}</div></div></div>`).join('');
   grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{ if(locked) return; SETUP_TEAM = el.dataset.team; grid.querySelectorAll('.minicard').forEach(x=>x.classList.toggle('setupSel', x.dataset.team===SETUP_TEAM)); if(!tn.value.trim()) tn.placeholder = `예: ${SETUP_TEAM} 구단명`; }));
   document.getElementById('setupPage').classList.add('active');
 }
@@ -833,7 +833,7 @@ function renderLeagueBox(){
     if(!m || m.left){ st = '<span style="color:var(--sub)">AI</span>'; who = ''; }
     else { who = `${m.name||t} <span style="color:var(--sub)">· ${m.nick||''}</span>`;
       st = Date.now() < Date.parse(m.activeFrom||0) ? '<span style="color:#b07a00">다음 시즌 참가</span>' : memberStale(m) ? '<span style="color:#e0312b">장기 미접속 → AI</span>' : `<span style="color:#0a8f5a">참가 중</span>`; }
-    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #f5f7fa; font-size:12px; ${t===team?'font-weight:800':''}"><span><span style="display:inline-block; width:8px; height:8px; border-radius:4px; background:${TC[t]}; margin-right:5px"></span>${t}${who?` → ${who}`:''}</span>${st}</div>`; }).join('');
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #f5f7fa; font-size:12px; ${t===team?'font-weight:800':''}"><span><span style="display:inline-block; width:8px; height:8px; border-radius:4px; background:${TC[t]}; margin-right:5px"></span>${teamFull(t)}${who?` → ${who}`:''}</span>${st}</div>`; }).join('');
   box.innerHTML = `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">공유 리그 코드 <b style="font-size:16px; letter-spacing:2px">${LEAGUE.code}</b>
       <button class="btn ghost" id="lgCopy" style="padding:4px 10px; font-size:11px">코드 복사</button>${LEAGUE.root && LEAGUE.root.owner===UID ? '<span style="font-size:11px; color:var(--gold); font-weight:800">방장</span>' : ''}</div>
     ${pend ? `<div style="margin-top:6px; color:#b07a00; font-weight:800">참가 예약됨 — ${new Date(Date.parse(me.activeFrom)).toLocaleString()} 개막하는 시즌부터 합류해요. 그 전까지는 개인 리그로 진행돼요.</div>` : ''}
@@ -920,7 +920,9 @@ function refreshCurrencyDisplay(){
 function getNickname(){ return localStorage.getItem('sn_nickname') || ''; }
 // 내가 정한 구단명(베이스 팀 자리를 대신함). 없으면 베이스 팀 이름
 function myTeamName(){ return localStorage.getItem('sn_teamname_'+ns()) || team; }
-function TN(t){ if(t===team) return myTeamName(); if(inLeague() && LEAGUE.members[t] && isHuman(t)) return LEAGUE.members[t].name || t; return t; }
+const TEAM_SUB = {'산예':'프라이즈','술사':'소서러스','북두':'폴라리스','백호':'스노클로스','반달':'크레센츠','이무기':'크라켄스','비차':'코메츠','바다매':'오스프리스','송골':'피닉스','화랑':'나이츠'}; // 팀 서브 이름
+function teamFull(t){ return TEAM_SUB[t] ? t+' '+TEAM_SUB[t] : t; }
+function TN(t){ if(t===team) return myTeamName(); if(inLeague() && LEAGUE.members[t] && isHuman(t)) return LEAGUE.members[t].name || t; return teamFull(t); }
 function setNickname(n){ localStorage.setItem('sn_nickname', n); schedulePush(); }
 function hideNicknameGate(){ const g = document.getElementById('nicknameGate'); if(g) g.classList.remove('active'); }
 function showNicknameGateIfNeeded(){
@@ -929,7 +931,7 @@ function showNicknameGateIfNeeded(){
 function hideTeamPickPage(){ const g = document.getElementById('teamPickPage'); if(g) g.classList.remove('active'); }
 function renderTeamPickGrid(){
   const grid = document.getElementById('teamPickGrid');
-  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled" data-team="${t}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div></div></div>`).join('');
+  grid.innerHTML = TEAMS.map(t=>`<div class="minicard filled" data-team="${t}"><div class="av ${tbg(t,'p')}" style="background-color:${TC[t]}"></div><div class="info"><div class="nm">${t}</div><div class="ps" style="font-size:10px">${TEAM_SUB[t]||''}</div></div></div>`).join('');
   grid.querySelectorAll('[data-team]').forEach(el=>el.addEventListener('click', ()=>{
     const t = el.dataset.team;
     if(!confirm(`${t}로 시작할까요?\n이 닉네임으로는 팀을 다시 바꿀 수 없어요. (다른 팀은 새 닉네임으로)`)) return;
@@ -3648,7 +3650,7 @@ function cardFrontHTML(c){
     </div>
     <div class="fbody">
       <div class="fname">${c.name}${yrTag(c)}</div>
-      <div class="fteam">${c.team} · ${posLabel} · ${c.tier} · ${c.year||2025}시즌</div>
+      <div class="fteam">${teamFull(c.team)} · ${posLabel} · ${c.tier} · ${c.year||2025}시즌</div>
       ${statRowsHTML(c, RARITY_COLOR[c.rarity])}
       <div class="fcost">COST ${starsHTML(c.cost)}</div>
     </div>
@@ -3669,7 +3671,7 @@ function cardBackHTML(c){
   return `<div class="flipcard rarity-${c.rarity}" style="background:#fff">
     <div class="fbody" style="padding-top:16px">
       <div class="fname">${c.name} <span style="font-size:11px; color:var(--sub); font-weight:400">시즌 성적</span></div>
-      <div class="fteam">${c.team} · ${isB?(c.fieldpos||'타자'):c.pos}</div>
+      <div class="fteam">${teamFull(c.team)} · ${isB?(c.fieldpos||'타자'):c.pos}</div>
       <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px">
         <tr style="color:var(--sub)">${heads.map(h=>`<th style="text-align:left; padding:4px 2px; border-bottom:1px solid #eef1f6">${h}</th>`).join('')}</tr>
         ${seasonRow.replace(/<td>/g,'<td style="padding:4px 2px; border-bottom:1px solid #f5f7fa">')}
