@@ -262,7 +262,7 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
 <div class="filtertabs" id="luTabs"></div>
 <div id="lu-tac" style="display:none">
 <div id="tacticsBox" style="margin-bottom:8px"></div>
-<div style="font-size:11px; color:var(--sub); margin-bottom:6px; line-height:1.6">카드 표시: 컨디션 ⇈최상 ↑좋음 →보통 ↓나쁨 ⇊최악(하루 단위, ±6%까지) · 🔒 시즌 중 선발 투수 교체 잠금(24시간) · 피로n 불펜 연투(다음 등판 −8%×n)</div>
+<div style="font-size:11px; color:var(--sub); margin-bottom:6px; line-height:1.6">카드 표시: 컨디션 ⇈최상 ↑좋음 →보통 ↓나쁨 ⇊최악(하루 단위, ±6%까지) · 🔒 시즌 중 선발 투수 교체 잠금(8시간) · 피로n 불펜 연투(다음 등판 −8%×n)</div>
 </div>
 <div id="lu-bat">
 <h2 class="sec">타순 (누르면 선택 → 바꿀 칸·선수를 누르기 · 드래그도 가능)</h2>
@@ -382,6 +382,7 @@ function renameTeamsInPayload(d){
     localStorage.setItem('sn_rename_v2','1');
   }catch(e){}
 })();
+var LU_EDITING = false, DRAFT = null; // 라인업 편집 임시 저장 상태(아래 lsGet/lsSet)
 (function migrateNames3(){
   try{ // v3: 술사 → 진인 (키·값 모두)
     if(!localStorage.getItem('sn_rename_v3')){
@@ -769,6 +770,7 @@ async function loadLeague(){
 }
 async function pushMember(extra){
   if(!LEAGUE || !LEAGUE.code || LEAGUE.gone || !DB_READY) return;
+  if(draftDirty()) return; // 저장 전 편집 내용은 올리지 않음
   const me = LEAGUE.members[team] || {};
   const d = {...me, ...(extra||{}), uid: UID, nick: getNickname(), name: myTeamName(), base: team, lastSeen: new Date().toISOString(), lastSeenMs: Date.now(), snap: buildSnap()};
   LEAGUE.members[team] = d;
@@ -1092,12 +1094,44 @@ function triggerOnboarding(t){
   document.getElementById('overlay').classList.add('active');
 }
 
+// ===== 라인업 편집 임시 저장: 라인업 화면에서 바꾼 내용은 [저장]을 눌러야 실제 경기에 반영 =====
+var DRAFT_PREFIX = ['sn_lineup_','sn_lineuppos_','sn_bench_','sn_pitchers_'];
+function lsGet(k){ return (DRAFT && Object.prototype.hasOwnProperty.call(DRAFT, k)) ? DRAFT[k] : localStorage.getItem(k); }
+function lsSet(k, v){ if(LU_EDITING && DRAFT_PREFIX.some(p=>k.startsWith(p))){ if(localStorage.getItem(k)===v && DRAFT){ delete DRAFT[k]; if(!Object.keys(DRAFT).length) DRAFT = null; } else { DRAFT = DRAFT || {}; DRAFT[k] = v; } updateSaveBar(); return; } localStorage.setItem(k, v); }
+function draftDirty(){ return !!(DRAFT && Object.keys(DRAFT).length); }
+function commitDraft(){
+  if(!draftDirty()) return true;
+  const kP = 'sn_pitchers_'+ns()+'_'+team;
+  if(Object.prototype.hasOwnProperty.call(DRAFT, kP)){
+    let prevS = [], nextS = [];
+    try{ prevS = ((JSON.parse(localStorage.getItem(kP)||'{}')||{}).starters||[]).filter(Boolean).map(migrateKey); }catch(e){}
+    try{ nextS = ((JSON.parse(DRAFT[kP]||'{}')||{}).starters||[]).filter(Boolean); }catch(e){}
+    if(!lockGate(prevS, nextS, 5, '__holeP')) return false;
+  }
+  for(const k in DRAFT) localStorage.setItem(k, DRAFT[k]);
+  DRAFT = null; updateSaveBar(); schedulePush(); try{ renderCostBar(); }catch(e){}
+  return true;
+}
+function discardDraft(){
+  DRAFT = null; lineup = loadLineupObjs() || new Array(9).fill(null); pitcherLineup = loadPitcherLineup(); selPitcherSlot = null; try{ LU_SEL = null; }catch(e){}
+  updateSaveBar();
+}
+function updateSaveBar(){
+  let bar = document.getElementById('luSaveBar');
+  if(!bar){ const v = document.getElementById('view-lineup'); if(!v) return; bar = document.createElement('div'); bar.id = 'luSaveBar'; v.insertBefore(bar, v.firstChild); }
+  if(!draftDirty()){ bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.cssText = 'position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:8px; background:#fff3cd; border:1.5px solid #e0b100; border-radius:10px; padding:8px 10px; margin-bottom:8px; box-shadow:0 2px 8px rgba(0,0,0,.08)';
+  bar.innerHTML = `<div style="flex:1; font-size:12px; font-weight:800; color:#7a5a00">저장하지 않은 변경이 있어요<div style="font-weight:400; font-size:11px">[저장]을 눌러야 경기에 반영돼요</div></div>
+    <button class="btn ghost" id="luDiscard" style="padding:6px 12px; font-size:12px">되돌리기</button><button class="btn" id="luSave" style="padding:6px 16px; font-size:12px">저장</button>`;
+  document.getElementById('luSave').onclick = ()=>{ if(commitDraft()){ renderLineup(); renderPitchers(); renderHome(); } };
+  document.getElementById('luDiscard').onclick = ()=>{ if(!confirm('바꾼 내용을 모두 되돌릴까요?')) return; discardDraft(); renderLineup(); renderPitchers(); };
+}
+window.addEventListener('beforeunload', e=>{ if(draftDirty()){ e.preventDefault(); e.returnValue = ''; } });
 function saveLineup(){
-  let prev = []; try{ prev = (JSON.parse(localStorage.getItem('sn_lineup_'+ns()+'_'+team)||'[]')||[]).filter(Boolean).map(migrateKey); }catch(e){}
-  try{ localStorage.setItem('sn_lineup_'+ns()+'_'+team, JSON.stringify(lineup.map(c=>c?pkey(c):null))); }catch(e){} schedulePush(); return true;
+  try{ lsSet('sn_lineup_'+ns()+'_'+team, JSON.stringify(lineup.map(c=>c?pkey(c):null))); }catch(e){} if(!LU_EDITING) schedulePush(); return true;
 }
 function loadLineupObjs(){
-  const raw = localStorage.getItem('sn_lineup_'+ns()+'_'+team);
+  const raw = lsGet('sn_lineup_'+ns()+'_'+team);
   if(!raw) return null;
   const keys = JSON.parse(raw);
   return keys.map(k => k? CARDS.find(c=>pkey(c)===migrateKey(k) && c.pos==='타자') : null);
@@ -1112,6 +1146,11 @@ function avgStat(c){ const vals=c.stats.map(s=>s[1]); return Math.round(vals.red
 
 // ===== nav =====
 document.querySelectorAll('.navbtn').forEach(b=>b.addEventListener('click',()=>{
+  if(LU_EDITING && b.dataset.v!=='lineup' && draftDirty()){
+    if(confirm('라인업에 저장하지 않은 변경이 있어요.\n확인 = 저장하고 이동 · 취소 = 저장하지 않고 이동(되돌림)')){ if(!commitDraft()) return; }
+    else discardDraft();
+  }
+  LU_EDITING = b.dataset.v==='lineup'; updateSaveBar();
   document.querySelectorAll('.navbtn').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
@@ -1516,7 +1555,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 65; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 66; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1907,13 +1946,14 @@ async function renderStandingsTab(){
   renderStandingsPanes();
 }
 
-// ===== 시즌 중 선발 투수 교체 잠금: 선발 로테이션 5명에서 빠지거나 들어온 투수는 24시간 다시 교체 불가 =====
+// ===== 시즌 중 선발 투수 교체 잠금: 선발 로테이션 5명에서 빠지거나 들어온 투수는 8시간 다시 교체 불가 =====
 function seasonStartCached(){ return (LAST_SEASON && LAST_SEASON.seasonStart) || localStorage.getItem(LK('sn_seasonstart')); }
 function inSeason(){ const s = seasonStartCached(); if(!s) return false; const t0 = new Date(s).getTime(), now = Date.now(); return now>=t0 && now < t0 + 7*86400000; }
 function loadLocks(){ try{ return JSON.parse(localStorage.getItem('sn_locks_'+ns()+'_'+team)||'{}'); }catch(e){ return {}; } }
 function saveLocks(o){ const now = Date.now(); for(const k in o){ if(!k.startsWith('__') && o[k]<=now) delete o[k]; } try{ localStorage.setItem('sn_locks_'+ns()+'_'+team, JSON.stringify(o)); }catch(e){} }
 function lockLeft(c){ if(!c || c.pos==='타자') return 0; const t = loadLocks()[pkey(c)]; return t && t>Date.now() ? t-Date.now() : 0; }
-function lockGate(prev, next, full, holeKey){
+const STARTER_LOCK_MS = 8*3600000; // 선발 교체 잠금 8시간
+function lockGate(prev, next, full, holeKey, dry){
   if(!inSeason()) return true;
   const out = prev.filter(k=>!next.includes(k)), inn = next.filter(k=>!prev.includes(k));
   if(!out.length && !inn.length) return true; // 순서만 바뀐 경우
@@ -1923,10 +1963,11 @@ function lockGate(prev, next, full, holeKey){
   const blocked = involved.filter(k=>L[k] && L[k]>now);
   if(blocked.length){
     const names = blocked.map(k=>k.split('|')[1]).join(', '), left = Math.max(...blocked.map(k=>L[k])) - now;
-    alert(`🔒 ${names}\n시즌 중 선발 로테이션에서 교체된 투수는 하루 동안 다시 바꿀 수 없어요. (${fmtRemain(left)})`);
+    alert(`🔒 ${names}\n시즌 중 선발 로테이션에서 교체된 투수는 8시간 동안 다시 바꿀 수 없어요. (${fmtRemain(left)})`);
     return false;
   }
-  involved.forEach(k=>{ L[k] = now + 86400000; });
+  if(dry) return true;
+  involved.forEach(k=>{ L[k] = now + STARTER_LOCK_MS; });
   if(next.length<full) L[holeKey] = 1; else delete L[holeKey];
   saveLocks(L); return true;
 }
@@ -2251,7 +2292,7 @@ const HELP_SECTIONS = [
   ['편의 기능','라인업 탭 위쪽 버튼: ⚡추천 라인업(보유 카드로 가장 강한 타순·투수진 자동 편성), 💾프리셋(라인업 3개 저장·불러오기), ⚖카드 비교(두 카드 능력치 나란히 보기). 일정에서 내 경기 박스스코어를 열면 📻경기 중계를 다시 볼 수 있어요(이 기기 최근 30경기). 하단 탭의 빨간 숫자는 읽지 않은 알림·완료된 유학이에요.'],
   ['시즌 진행','한 시즌은 일주일이에요. 일~금 매시 정각(07~24시)에 10팀이 동시에 경기하고, 토요일은 포스트시즌(1~5위)이에요. 주중에 시작하면 일요일 개막 전까지 시범경기(기록·순위 미반영)를 해요. 접속하지 않아도 시간에 맞춰 자동 진행돼요.'],
   ['카드와 코스트','선수 카드는 실제 기록을 바탕으로 능력치·코스트(1~10)·등급(일반·레어·에이스·레전드)이 정해져요. 같은 카드를 또 뽑으면 겹치기(최대 10회, 1회마다 전 능력치 +1), 다 채우면 코스트×100냥으로 돌려받아요.'],
-  ['라인업','타순 9명·벤치 5명·투수 11명(선발5·중계4·셋업1·마무리1)을 직접 채워야 내 라인업으로 경기해요. 타순마다 수비 포지션을 정하고, 기록 없는 포지션은 능력치가 깎여요. 선발 투수를 불펜에 쓰면 −15%. 시즌 중 선발 로테이션에서 바꾼 투수는 하루 동안 다시 못 바꿔요.'],
+  ['라인업','타순 9명·벤치 5명·투수 11명(선발5·중계4·셋업1·마무리1)을 직접 채워야 내 라인업으로 경기해요. 타순마다 수비 포지션을 정하고, 기록 없는 포지션은 능력치가 깎여요. 선발 투수를 불펜에 쓰면 −15%. 시즌 중 선발 로테이션에서 바꾼 투수는 8시간 동안 다시 못 바꿔요.'],
   ['팀컬러','경기 로스터+벤치에 같은 팀·같은 연도 선수가 많을수록 그 팀 선수에게 보너스: 10명 C · 15명 B · 20명 A · 25명 S.'],
   ['컨디션·피로','선수마다 매일 컨디션(⇈최상 ~ ⇊최악, ±6%)이 바뀌어요. 불펜 투수가 연속 등판하면 다음 경기에 −8%씩 지쳐요. 선발은 5명이 돌아가며 던져요.'],
   ['성장','훈련 탭에서 스킬블록(능력치+) 장착, 유학(12일, 성공 70%)으로 키워요. 유학지는 한국시리즈 우승·정규 1위 횟수로 열려요. 능력치는 상한이 없고, 수비·구종 등급은 D~EX로 표시돼요.'],
@@ -2869,9 +2910,9 @@ function renderCostBar(){
     <div style="flex-basis:100%; font-size:11px; color:var(--sub)">${tcText}</div>`;
 }
 const BENCH_MAX = 5; // 벤치는 타순처럼 최대 5자리
-function loadBench(){ try{ return new Set(JSON.parse(localStorage.getItem('sn_bench_'+ns()+'_'+team)||'[]').slice(0, BENCH_MAX)); }catch(e){ return new Set(); } }
+function loadBench(){ try{ return new Set(JSON.parse(lsGet('sn_bench_'+ns()+'_'+team)||'[]').slice(0, BENCH_MAX)); }catch(e){ return new Set(); } }
 function benchAdd(k){ const b = loadBench(); if(b.has(k)) return true; if(b.size>=BENCH_MAX){ alert(`벤치는 최대 ${BENCH_MAX}명까지예요. 벤치 선수를 먼저 빼주세요.`); return false; } b.add(k); saveBench(b); return true; }
-function saveBench(s){ try{ localStorage.setItem('sn_bench_'+ns()+'_'+team, JSON.stringify([...s])); }catch(e){} schedulePush(); }
+function saveBench(s){ try{ lsSet('sn_bench_'+ns()+'_'+team, JSON.stringify([...s])); }catch(e){} if(!LU_EDITING) schedulePush(); }
 let waitPosFilter = '전체';
 let pitcherPosFilter = '전체';
 let waitSort = null; // null | 'desc' | 'asc'
@@ -2899,10 +2940,10 @@ function autoLineupPos(lu){
   return res;
 }
 function loadLineupPos(){
-  try{ const a = JSON.parse(localStorage.getItem('sn_lineuppos_'+ns()+'_'+team)||'null'); if(Array.isArray(a) && a.length===9 && new Set(a).size===9 && a.every(p=>LINEUP_POSITIONS.includes(p))) return a; }catch(e){}
+  try{ const a = JSON.parse(lsGet('sn_lineuppos_'+ns()+'_'+team)||'null'); if(Array.isArray(a) && a.length===9 && new Set(a).size===9 && a.every(p=>LINEUP_POSITIONS.includes(p))) return a; }catch(e){}
   return autoLineupPos(lineup || loadLineupObjs() || []);
 }
-function saveLineupPos(a){ try{ localStorage.setItem('sn_lineuppos_'+ns()+'_'+team, JSON.stringify(a)); }catch(e){} schedulePush(); }
+function saveLineupPos(a){ try{ lsSet('sn_lineuppos_'+ns()+'_'+team, JSON.stringify(a)); }catch(e){} if(!LU_EDITING) schedulePush(); }
 function positionFit(c, pos){
   if(!c) return {pen:0, label:''};
   if(pos==='지명타자') return {pen:0, label:'지명타자'};
@@ -3065,13 +3106,13 @@ let selPitcherSlot = null;
 function emptyPitcherLineup(){ return {starters:new Array(5).fill(null), middle:new Array(4).fill(null), setup:[null], closer:[null]}; }
 function savePitcherLineup(){
   let prevS = []; try{ prevS = ((JSON.parse(localStorage.getItem('sn_pitchers_'+ns()+'_'+team)||'{}')||{}).starters||[]).filter(Boolean).map(migrateKey); }catch(e){}
-  if(!lockGate(prevS, (pitcherLineup.starters||[]).filter(Boolean).map(pkey), 5, '__holeP')){ pitcherLineup = loadPitcherLineup(); return false; }
+  if(!lockGate(prevS, (pitcherLineup.starters||[]).filter(Boolean).map(pkey), 5, '__holeP', LU_EDITING)){ pitcherLineup = loadPitcherLineup(); return false; } // 편집 중에는 잠금 확인만(실제 잠금은 저장할 때)
   const out = {}; for(const k in pitcherLineup) out[k]=pitcherLineup[k].map(c=>c?pkey(c):null);
-  try{ localStorage.setItem('sn_pitchers_'+ns()+'_'+team, JSON.stringify(out)); }catch(e){}
-  schedulePush(); return true;
+  try{ lsSet('sn_pitchers_'+ns()+'_'+team, JSON.stringify(out)); }catch(e){}
+  if(!LU_EDITING) schedulePush(); return true;
 }
 function loadPitcherLineup(){
-  const raw = localStorage.getItem('sn_pitchers_'+ns()+'_'+team);
+  const raw = lsGet('sn_pitchers_'+ns()+'_'+team);
   if(!raw) return emptyPitcherLineup();
   const keys = JSON.parse(raw);
   const out = {};
