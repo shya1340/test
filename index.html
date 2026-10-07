@@ -1266,6 +1266,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
+const APP_BUILD = 62; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1451,6 +1452,35 @@ function computeStandings(season){
 }
 
 // ===== 일정(달력) · 순위(순위표/팀별 성적/개인 성적) =====
+// ===== 내 팀 선수 기록 보정: 정규시즌 박스스코어(내 경기)로 내 팀 기록을 다시 계산해 빠진 기록을 채움 =====
+// (예전 버전이 열려 있던 기기가 경기를 계산하면 내 팀 기록이 AI 기록 쪽에 들어가 카드 뒷면에 0으로 보이던 문제 대응)
+function fixMyGS(season){
+  try{
+    if(!season || !season.results || !GS) return false;
+    const owned = loadOwned();
+    const ownCards = CARDS.filter(c=>owned.has(pkey(c)));
+    const inUse = new Set([...(lineup||[]), ...['starters','middle','setup','closer'].flatMap(k=>((pitcherLineup||{})[k]||[]))].filter(Boolean).map(pkey));
+    const byName = (n, isB) => { const L = ownCards.filter(c=>c.name===n && (c.pos==='타자')===isB); return L.find(c=>inUse.has(pkey(c))) || L[0]; };
+    const B = {}, P = {};
+    for(let i=0;i<=season.lastSimIdx;i++){
+      const g = season.games[i], r = season.results[i];
+      if(!r || !r.box || !(g.home===team || g.away===team)) continue;
+      const bx = r.box, side = bx.side;
+      for(const b of (bx.bat||[])){ const c = byName(b.n, true); if(!c) continue; const k = 'U#'+pkey(c);
+        const s = B[k] || (B[k] = {g:0, pa:0, ab:0, h:0, hr:0, rbi:0, sb:0});
+        s.g++; s.ab += b.ab||0; s.pa += (b.ab||0)+(b.bb||0); s.h += b.h||0; s.hr += b.hr||0; s.rbi += b.rbi||0; s.sb += b.sb||0; }
+      for(const p of ((bx.pit||{})[side]||[])){ const c = byName(p.n, false); if(!c) continue; const k = 'U#'+pkey(c);
+        const s = P[k] || (P[k] = {g:0, outs:0, runs:0, so:0, w:0, l:0, hld:0, sv:0});
+        const [ip, fr] = String(p.ip||'0.0').split('.'); s.g++; s.outs += (+ip||0)*3 + (+fr||0); s.runs += p.r||0; s.so += p.so||0;
+        if(p.d==='W') s.w++; else if(p.d==='L') s.l++; else if(p.d==='HLD') s.hld++; else if(p.d==='SV') s.sv++; }
+    }
+    let changed = false;
+    const merge = (src, main) => { for(const k in src){ const d = src[k], cur = GS[k];
+      if(!cur || (cur[main]||0) < d[main]){ GS[k] = {...(cur||{}), ...d}; changed = true; } } };
+    merge(B, 'pa'); merge(P, 'outs');
+    return changed;
+  }catch(e){ return false; }
+}
 let LAST_SEASON = null, LAST_PS = null, CAL_SEL = null, ST_TAB = 'rank', PL_CAT = '타율', PL_GRP = 'bat';
 const WEEKDAY = ['일','월','화','수','목','금','토'];
 function gameDayKey(d){ const x = new Date(d); if(x.getHours()===0) x.setHours(-1); return dayKey(x); } // 24시(자정) 경기는 전날 경기로
@@ -1615,6 +1645,7 @@ async function renderUserRanking(){
 async function renderStandingsTab(){
   await renderSchedule(); // 시즌 진행 반영(순위표·포스트시즌 갱신)
   if(DB_READY){ try{ const s = await DB.doc(LG('gamestats')).get(); GS = s.exists ? (s.data()||{}) : {}; /* 클라우드에 기록이 없으면 비어 있는 게 맞음(예전 로컬 기록 사용 안 함) */ }catch(e){} }
+  fixMyGS(LAST_SEASON);
   renderStandingsPanes();
 }
 
@@ -2256,6 +2287,7 @@ async function catchUpSeasonShared(){
   // 다른 기기가 이미 계산했으면 선수 기록도 클라우드 것을 받아옴(안 받으면 이 기기의 옛 기록이 카드에 표시됨)
   const pullGS = async ()=>{ try{ const g = await DB.doc(LG('gamestats')).get(); GS = g.exists ? (g.data()||{}) : {}; saveGameStats(GS); }catch(e){} };
   if(target <= season.lastSimIdx && !preBehind){ await pullGS(); return season; } // 이미 최신
+  if((season.build||0) > APP_BUILD){ await pullGS(); try{ if(!window.__oldWarned){ window.__oldWarned = 1; alert('새 버전이 나왔어요. 화면을 새로고침(앱은 완전히 닫았다가 다시 열기)해 주세요.\n지금 버전에서는 경기 계산을 하지 않아요.'); } }catch(e){} return season; }
   const ref = DB.doc(LG('season'));
   const lease = await ref.acquire({holder:UID, ttlMs:15000});
   if(!lease.acquired){ await pullGS(); return season; } // 다른 기기가 지금 갱신 중 - 있는 그대로 표시
@@ -2279,7 +2311,7 @@ async function catchUpSeasonShared(){
     changed=true;
   }
   if(target2>season.lastSimIdx) season.lastSimIdx = target2;
-  if(changed){ await ref.set(season); await gsRef.set(GS); }
+  if(changed){ season.build = Math.max(season.build||0, APP_BUILD); fixMyGS(season); await ref.set(season); await gsRef.set(GS); }
   saveGameStats(GS);
   return season;
 }
@@ -2505,7 +2537,7 @@ async function renderSchedule(){
   } else {
     document.getElementById('postseasonBox').style.display='none';
   }
-  LAST_SEASON = season; try{ localStorage.setItem(LK('sn_seasonstart'), season.seasonStart); }catch(e){} renderCalendar(); try{ renderNextOpponent(); }catch(e){} try{ renderDaily(); renderNotices(); }catch(e){}
+  LAST_SEASON = season; if(fixMyGS(season)) saveGameStats(GS); try{ localStorage.setItem(LK('sn_seasonstart'), season.seasonStart); }catch(e){} renderCalendar(); try{ renderNextOpponent(); }catch(e){} try{ renderDaily(); renderNotices(); }catch(e){}
   pushRanking();
 }
 // 포스트시즌이 끝난 뒤 다음 일요일이 지나면 새 시즌 생성(일요일이 아니면 다음 일요일까지 시범경기)
@@ -3376,6 +3408,7 @@ function cardBackHTML(c){
     ? `<tr><td>2025</td><td>${c.g}</td><td>${c.avg.toFixed(3)}</td><td>${c.hr}</td><td>${c.rbi}</td></tr>`
     : `<tr><td>2025</td><td>${c.g}</td><td>${c.era}</td><td>${c.ip}</td><td>${c.so}</td></tr>`;
   const heads = isB ? ['연도','G','AVG','HR','RBI'] : ['연도','G','ERA','IP','SO'];
+  fixMyGS(LAST_SEASON);
   const gsl = gameStatLine(c);
   const gsRow = isB
     ? `<tr><td>${gsl.g||0}</td><td>${(gsl.avg||0).toFixed(3)}</td><td>${gsl.ab||0}</td><td>${gsl.h||0}</td><td>${gsl.hr||0}</td><td>${gsl.rbi||0}</td><td>${gsl.sb||0}</td></tr>`
