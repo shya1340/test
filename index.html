@@ -1555,7 +1555,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 66; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 67; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -2802,8 +2802,8 @@ async function renderSchedule(){
   document.getElementById('standings').innerHTML = (inPre?'<div style="font-size:11px; color:var(--sub)">시범경기 순위 (정규시즌에 반영되지 않아요)</div>':'') + `<table class="standtbl"><tr><th class="rk">순</th><th>팀</th><th>승</th><th>무</th><th>패</th><th>승률</th><th>게임차</th></tr>${
     standings.map((s,i)=>{ const top = standings[0], gb = ((top.w-s.w)+(s.l-top.l))/2;
       return `<tr class="${s.team===team?'me':''}" data-team="${s.team}" style="cursor:pointer"><td class="rk">${s.rank}</td><td>${TN(s.team)}</td><td>${s.w}</td><td>${s.t}</td><td>${s.l}</td><td>${s.w+s.l>0 ? s.pct.toFixed(3) : '-'}</td><td>${gb<=0?'-':gb.toFixed(1)}</td></tr>`; }).join('')
-  }</table><div style="font-size:11px; color:var(--sub); margin-top:2px">팀을 클릭하면 그 팀의 카드 도감을 볼 수 있어요</div>`;
-  document.querySelectorAll('#standings tr[data-team]').forEach(el=>el.addEventListener('click', ()=>showTeamDex(el.dataset.team)));
+  }</table><div style="font-size:11px; color:var(--sub); margin-top:2px">팀을 누르면 그 팀의 라인업을 볼 수 있어요 (카드 도감은 홈 화면에 있어요)</div>`;
+  document.querySelectorAll('#standings tr[data-team]').forEach(el=>el.addEventListener('click', ()=>showTeamLineup(el.dataset.team)));
   const myGames = [];
   for(let i=view.lastSimIdx;i>=0 && myGames.length<5;i--){
     const g = view.games[i];
@@ -3785,6 +3785,43 @@ function cardResultHTML(c, r){
     <div style="padding:8px 12px 12px; background:rgba(255,255,255,.08); font-size:12px; color:#d4a94b; border-top:1px solid rgba(255,255,255,.1)">COST ${starsHTML(c.cost)}</div>
     </div>`;
 }
+// ===== 팀 라인업 보기 (순위표에서 팀 누르기): 내 팀 = 저장된 라인업, 다른 감독 팀 = 그 감독이 올린 라인업, AI 팀 = 기본 편성 =====
+function showTeamLineup(t){
+  const savedAt = SIM_CTX.at; SIM_CTX.at = Date.now(); // 지금 기준으로 사람/AI 판별
+  let lu = [], st = null, bench = [], tac = null, kind = 'AI 팀 기본 편성', who = '';
+  try{
+    lu = (lineupFor(t)||[]).filter(Boolean); st = staffFor(t);
+    if(t===team){ kind = '내 팀 (저장된 라인업)'; who = getNickname(); tac = loadTactics();
+      const own = loadOwned(); bench = [...loadBench()].filter(k=>own.has(k)).map(k=>cardByKey(k)).filter(c=>c && c.pos==='타자').map(c=>boostedCard(c)); }
+    else if(inLeague() && isHuman(t) && snapOf(t)){ const m = LEAGUE.members[t]; kind = '감독 팀 (마지막 저장 라인업)'; who = m.nick||''; tac = snapOf(t).tactics; bench = snapBench(t);
+      if(m.snap && m.snap.at){ const d = new Date(m.snap.at); kind += ` · ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} 저장`; } }
+  }finally{ SIM_CTX.at = savedAt; }
+  const v = (c, k) => (c.stats.find(s=>s[0]===k)||[0,0])[1];
+  const ovr = c => Math.round(c.stats.reduce((s,x)=>s+x[1],0)/c.stats.length);
+  const lpos = (t===team) ? (()=>{ try{ return loadLineupPos(); }catch(e){ return null; } })() : null;
+  const posOf = (c, i) => c.gamePos || (lpos && lpos[i]) || c.fieldpos || '';
+  const nm = c => `<b>${c.name}</b>${yrTag(c)} <span style="font-size:10px; color:${TC[c.team]}; font-weight:800">${c.team}</span>`;
+  const bRow = (c, i) => `<tr><td style="color:var(--sub)">${i+1}</td><td style="white-space:nowrap">${posAbbr(posOf(c,i))}</td><td style="white-space:nowrap">${nm(c)}</td><td>★${c.cost}</td><td>${v(c,'교타력')}</td><td>${v(c,'장타력')}</td><td>${v(c,'주력')}</td><td>${v(c,'선구안')}</td><td>${v(c,'수비력')}</td><td><b>${ovr(c)}</b></td></tr>`;
+  const pRow = (c, lbl) => c ? `<tr><td style="color:var(--sub); white-space:nowrap">${lbl}</td><td style="white-space:nowrap">${nm(c)}</td><td>★${c.cost}</td><td>${v(c,'체력')}</td><td>${v(c,'구속')}</td><td>${v(c,'구위')}</td><td>${v(c,'변화구')}</td><td>${v(c,'제구')}</td><td><b>${ovr(c)}</b></td></tr>` : '';
+  const pit = st ? [...(st.starters||[]).map((c,i)=>pRow(c,'선발'+(i+1))), ...(st.middle||[]).map((c,i)=>pRow(c,['필승','박빙','추격','패전'][i]||'중계')), ...(st.setup||[]).map(c=>pRow(c,'셋업')), ...(st.closer||[]).map(c=>pRow(c,'마무리'))].join('') : '';
+  const all = [...lu, ...(st ? [...st.starters, ...st.middle, ...st.setup, ...st.closer].filter(Boolean) : [])];
+  const cost = all.reduce((s,c)=>s+(c.cost||0),0);
+  const T = tac ? normTactics(tac) : null;
+  const tacTxt = T ? TAC_ROWS.map(r=>`${r.l} ${T[r.k]}`).join(' · ') : '기본 작전';
+  openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span>
+    <h3 style="margin-bottom:2px"><span style="display:inline-block; width:10px; height:10px; border-radius:5px; background:${TC[t]}; margin-right:6px"></span>${TN(t)}</h3>
+    <div style="font-size:12px; color:var(--sub); margin-bottom:8px">${kind}${who?` · 감독 ${who}`:''} · 베이스 ${teamFull(t)} · 총 코스트 ${cost}</div>
+    <div class="roletitle">타순</div>
+    <div style="overflow-x:auto"><table class="standtbl" style="font-size:11px; white-space:nowrap"><tr><th>#</th><th>수비</th><th>선수</th><th>코</th><th>교타</th><th>장타</th><th>주력</th><th>선구</th><th>수비</th><th>평균</th></tr>${lu.map(bRow).join('')}</table></div>
+    ${bench.length ? `<div class="roletitle" style="margin-top:8px">벤치</div><div style="font-size:12px">${bench.map(c=>`${c.name} (${posAbbr(c.fieldpos)}·★${c.cost})`).join(' · ')}</div>` : ''}
+    <div class="roletitle" style="margin-top:8px">투수진</div>
+    <div style="overflow-x:auto"><table class="standtbl" style="font-size:11px; white-space:nowrap"><tr><th>보직</th><th>선수</th><th>코</th><th>체력</th><th>구속</th><th>구위</th><th>변화</th><th>제구</th><th>평균</th></tr>${pit}</table></div>
+    <div style="font-size:11px; color:var(--sub); margin-top:8px">작전: ${tacTxt}</div>
+    <div style="font-size:11px; color:var(--sub); margin-top:2px">능력치는 경기에 들어가는 값(스킬블록·유학·겹치기·팀컬러·포지션 보정 포함, 그날 컨디션 제외)이에요.</div>
+    <button class="btn ghost" id="tlDex" style="margin-top:10px; padding:6px 12px; font-size:12px">${t} 카드 도감 보기</button>`);
+  const d = document.getElementById('tlDex'); if(d) d.onclick = ()=>showTeamDex(t);
+}
+
 // ===== 카드 도감: 전체/팀별 탭 + 타자·투수·보유 필터 + 코스트 정렬. 회색 = 아직 보유하지 않은 카드 =====
 let DEX = {team:'전체', type:'전체', own:'전체', sort:'desc'};
 function showTeamDex(t){
