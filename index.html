@@ -882,11 +882,11 @@ function lgCreditGames(season, ps){
   if(st.s !== season.seasonStart) st = {s: season.seasonStart, ids: []};
   const done = new Set(st.ids); let n = 0;
   const af = Date.parse((LEAGUE && LEAGUE.members[team] || {}).activeFrom || 0) || 0; // 참가 전 경기(AI가 대신 뛴 경기)는 제외
-  const give = (id, my, op, cash, r, dk, at) => { if(done.has(id) || (at && +new Date(at) < af)) return; done.add(id); addCurrency(cash); msGame(r, {my, op}, dk, id); n++; };
+  const give = (id, my, op, cash, r, dk, at, side) => { if(done.has(id) || (at && +new Date(at) < af)) return; done.add(id); addCurrency(cash); msGame(r, {my, op, side}, dk, id); n++; };
   const pre = season.preseason;
   if(pre) for(let i=0;i<=pre.lastSimIdx;i++){ const g = pre.games[i], r = pre.results[i]; if(!r || !(g.home===team||g.away===team)) continue;
     const my = g.home===team ? r.scoreHome : r.scoreAway, op = g.home===team ? r.scoreAway : r.scoreHome;
-    give(season.seasonStart+'|p'+i, my, op, my>op?PRESEASON_REWARD.win:(my===op?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss), r, gameDayKey(pre.dates[i]), pre.dates[i]); }
+    give(season.seasonStart+'|p'+i, my, op, my>op?PRESEASON_REWARD.win:(my===op?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss), r, gameDayKey(pre.dates[i]), pre.dates[i], g.home===team?'h':'a'); }
   for(let i=0;i<=season.lastSimIdx;i++){ const g = season.games[i], r = season.results[i]; if(!r || !(g.home===team||g.away===team) || !r.box) continue; // 박스스코어가 올라온 뒤에 반영(활약 보너스 계산)
     const my = g.home===team ? r.scoreHome : r.scoreAway, op = g.home===team ? r.scoreAway : r.scoreHome;
     give(season.seasonStart+'|r'+i, my, op, (my>op?GAME_REWARD.win:(my===op?GAME_REWARD.tie:GAME_REWARD.loss)) + perfBonus(r), r, gameDayKey(slotIndexToDate(season.seasonStart, i)), slotIndexToDate(season.seasonStart, i)); }
@@ -1555,7 +1555,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 67; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 68; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1618,11 +1618,11 @@ function catchUpPreseason(season){
   try{
     for(let i=ps.lastSimIdx+1; i<=target; i++){
       const g = ps.games[i];
-      const r = simSeasonGame(g, {slot: Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(ps.dates[i]), at: ps.dates[i]});
+      const r = simSeasonGame(g, {slot: Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(ps.dates[i]), at: ps.dates[i], lite: true});
       ps.results[i] = r;
       if(!inLeague() && (g.home===team || g.away===team)){
         const my = g.home===team? r.scoreHome : r.scoreAway, opp = g.home===team? r.scoreAway : r.scoreHome;
-        addCurrency(my>opp?PRESEASON_REWARD.win:(my===opp?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss)); msGame(r, {my, op:opp}, gameDayKey(ps.dates[i]), season.seasonStart+'|p'+i);
+        addCurrency(my>opp?PRESEASON_REWARD.win:(my===opp?PRESEASON_REWARD.tie:PRESEASON_REWARD.loss)); msGame(r, {my, op:opp, side: g.home===team?'h':'a'}, gameDayKey(ps.dates[i]), season.seasonStart+'|p'+i);
       }
     }
   } finally { NO_TALLY = false; }
@@ -1708,6 +1708,12 @@ function simSeasonGame(g, ctx){
       if(inLeague()){ out.boxes = {}; sides.forEach(s=>{ out.boxes[s] = mk(s); }); if(ms) out.box = out.boxes[ms]; }
       else if(ms) out.box = mk(ms);
     }
+  }
+  if(ctx.lite){ // 시범경기: 박스스코어 대신 미션용 집계(안타·홈런·탈삼진)만 사람 팀에 저장
+    const sm = side => { const B = side==='h' ? r.box.home : r.box.away, P = side==='h' ? r.pbox.home : r.pbox.away;
+      return {h: Object.values(B).reduce((s,x)=>s+(x.h||0),0), hr: Object.values(B).reduce((s,x)=>s+(x.hr||0),0), so: Object.values(P).reduce((s,x)=>s+(x.so||0),0)}; };
+    if(isHuman(g.away, at)) (out.ms = out.ms || {}).a = sm('a');
+    if(isHuman(g.home, at)) (out.ms = out.ms || {}).h = sm('h');
   }
   return out;
 }
@@ -2042,19 +2048,24 @@ const MISSIONS = {
        {id:'d_win6', label:'내 팀 10승',            kind:'win',   need:10, reward:1200},
        {id:'d_hit',  label:'내 팀 안타 120개',      kind:'hit',   need:120,reward:400},
        {id:'d_pull', label:'카드 또는 블록 뽑기 1회', kind:'pull',  need:1,  reward:300} ],
-  w: [ {id:'w_att',  label:'5일 출석',              kind:'att',   need:5,  reward:2000, tickets:1},
+  w: [ {id:'w_att',  label:'5일 출석',              kind:'att',   need:5,  reward:2000},
        {id:'w_win',  label:'내 팀 50승',            kind:'win',   need:50, reward:4000},
        {id:'w_hr',   label:'내 팀 홈런 120개',      kind:'hr',    need:120,reward:2000},
        {id:'w_so',   label:'내 팀 탈삼진 600개',    kind:'so',    need:600,reward:2000},
        {id:'w_pull', label:'뽑기 10회',             kind:'pull',  need:10, reward:1500},
        {id:'w_ps',   label:'포스트시즌 진출',        kind:'ps',    need:1,  reward:3000} ],
-  m: [ {id:'m_att',  label:'20일 출석',             kind:'att',   need:20, reward:6000, tickets:5},
-       {id:'m_win',  label:'내 팀 200승',           kind:'win',   need:200,reward:10000, tickets:3},
+  m: [ {id:'m_att',  label:'20일 출석',             kind:'att',   need:20, reward:6000},
+       {id:'m_win',  label:'내 팀 200승',           kind:'win',   need:200,reward:10000},
        {id:'m_study',label:'유학 보내기 5회',        kind:'study', need:5,  reward:5000},
        {id:'m_pull', label:'뽑기 40회',             kind:'pull',  need:40, reward:5000},
-       {id:'m_ks',   label:'한국시리즈 우승 1회',    kind:'ks',    need:1,  reward:8000, tickets:5} ]
+       {id:'m_ks',   label:'한국시리즈 우승 1회',    kind:'ks',    need:1,  reward:8000} ]
 };
 const MS_LABEL = {d:'일일', w:'주간', m:'월간'};
+// 달성 보너스(뽑기권): 일일 모두 1장 · 주간 50% 2장/모두 5장 · 월간 50% 10장/모두 20장
+const MS_BONUS = {d:[['all',1]], w:[['half',2],['all',5]], m:[['half',10],['all',20]]};
+function msDoneCount(p, P){ return MISSIONS[p].filter(m=>(P.c[m.kind]||0)>=m.need).length; }
+function msBonusNeed(p, kind){ const n = MISSIONS[p].length; return kind==='all' ? n : Math.ceil(n/2); }
+function msBonusReady(p, P){ return MS_BONUS[p].filter(([k])=>msDoneCount(p,P)>=msBonusNeed(p,k) && !P.got['__'+k]).length; }
 function msDate(){ return new Date(Date.now() - DAILY_RESET_HOUR*3600000); }
 function msKeyOf(p, d){
   if(p==='d') return dayKey(d);
@@ -2084,6 +2095,7 @@ function msGame(r, mine, dk, gid){ try{
   const add = (k,n)=>{ if(n) for(const p of ['d','w','m']) if(msKeyOf(p, gd)===o[p].k) o[p].c[k] = (o[p].c[k]||0)+n; };
   add('win', win);
   if(b){ add('hit', (b.bat||[]).reduce((s,x)=>s+(x.h||0),0)); add('hr', (b.bat||[]).reduce((s,x)=>s+(x.hr||0),0)); add('so', ((b.pit||{})[b.side]||[]).reduce((s,x)=>s+(x.so||0),0)); }
+  else if(r && r.ms && mine && mine.side && r.ms[mine.side]){ const m = r.ms[mine.side]; add('hit', m.h); add('hr', m.hr); add('so', m.so); } // 시범경기
   if(gid) for(const p of ['d','w','m']) if(msKeyOf(p, gd)===o[p].k) o[p].ids[gid] = 1;
   saveMS(o);
 }catch(e){} }
@@ -2102,7 +2114,7 @@ function msSyncFromSeason(){
   const s = LAST_SEASON; if(!s) return;
   const vk = 'sn_msv2_'+ns();
   if(!localStorage.getItem(vk)){ const o = loadMS(); for(const p of ['d','w','m']){ ['win','hit','hr','so'].forEach(k=>{ o[p].c[k] = 0; }); o[p].ids = {}; } saveMS(o); try{ localStorage.setItem(vk,'1'); }catch(e){} }
-  const mine = (g,r)=> ({my: g.home===team ? r.scoreHome : r.scoreAway, op: g.home===team ? r.scoreAway : r.scoreHome});
+  const mine = (g,r)=> ({my: g.home===team ? r.scoreHome : r.scoreAway, op: g.home===team ? r.scoreAway : r.scoreHome, side: g.home===team ? 'h' : 'a'});
   for(let i=0;i<=s.lastSimIdx;i++){ const g = s.games[i], r = s.results[i]; if(r && (g.home===team||g.away===team)) msGame(r, mine(g,r), gameDayKey(slotIndexToDate(s.seasonStart, i)), s.seasonStart+'|r'+i); }
   const pre = s.preseason; if(pre) for(let i=0;i<=pre.lastSimIdx;i++){ const g = pre.games[i], r = pre.results[i]; if(r && (g.home===team||g.away===team)) msGame(r, mine(g,r), gameDayKey(pre.dates[i]), s.seasonStart+'|p'+i); }
 }
@@ -2110,7 +2122,7 @@ function renderDaily(){
   const box = document.getElementById('dailyBox'); if(!box) return;
   try{ msSyncFromSeason(); }catch(e){}
   const o = loadMS();
-  const tabs = ['d','w','m'].map(p=>{ const ready = MISSIONS[p].filter(m=>(o[p].c[m.kind]||0)>=m.need && !o[p].got[m.id]).length;
+  const tabs = ['d','w','m'].map(p=>{ const ready = MISSIONS[p].filter(m=>(o[p].c[m.kind]||0)>=m.need && !o[p].got[m.id]).length + msBonusReady(p, o[p]);
     return `<div class="ftab ${MS_TAB===p?'active':''}" data-mst="${p}" style="position:relative">${MS_LABEL[p]}${ready?` <span style="background:#e0312b; color:#fff; border-radius:8px; padding:0 5px; font-size:10px">${ready}</span>`:''}</div>`; }).join('');
   const p = MS_TAB, P = o[p];
   let st = {}; try{ st = JSON.parse(localStorage.getItem('sn_attstreak_'+ns())||'{}'); }catch(e){}
@@ -2123,10 +2135,17 @@ function renderDaily(){
     return `<div class="sched-row"><div style="flex:1; min-width:0"><b>${m.label}</b>
       <div style="height:5px; background:#eef1f6; border-radius:3px; margin:4px 0 2px; overflow:hidden"><div style="height:100%; width:${cur/m.need*100}%; background:var(--tc)"></div></div>
       <div class="result-line">${cur}/${m.need} · 보상 ${rw}${m.id==='d_att'?` · 연속 ${st.n||0}일(7일마다 뽑기권 3장)`:''}</div></div>${btn}</div>`; }).join('');
-  box.innerHTML = `<div class="filtertabs" style="margin-bottom:4px">${tabs}</div><div style="font-size:11px; color:var(--sub); margin-bottom:4px">${MS_LABEL[p]} 미션 · ${msResetText(p)}</div>${rows}`;
+  box.innerHTML = `<div class="filtertabs" style="margin-bottom:4px">${tabs}</div><div style="font-size:11px; color:var(--sub); margin-bottom:4px">${MS_LABEL[p]} 미션 · ${msResetText(p)}</div>${rows}${(()=>{ const dn = msDoneCount(p, P), n = MISSIONS[p].length;
+      return `<div style="margin-top:8px; padding:8px 10px; border:1.5px dashed var(--gold); border-radius:10px; background:#fffaf0">
+        <div style="font-size:12px; font-weight:800; margin-bottom:4px">🎁 ${MS_LABEL[p]} 달성 보너스 <span style="color:var(--sub); font-weight:400">(${dn}/${n} 달성)</span></div>
+        ${MS_BONUS[p].map(([k,t])=>{ const need = msBonusNeed(p,k), ok = dn>=need, got = P.got['__'+k];
+          return `<div style="display:flex; align-items:center; justify-content:space-between; padding:3px 0; font-size:12px"><span>${k==='all'?'모두 달성':`50% 달성 (${need}개)`} · 뽑기권 <b>${t}장</b></span>${got ? '<span style="color:var(--sub)">완료 ✓</span>' : ok ? `<button class="btn" data-msbonus="${k}" style="padding:5px 12px; font-size:12px">받기</button>` : `<span style="color:#b7c0d1">${dn}/${need}</span>`}</div>`; }).join('')}</div>`; })()}`;
   box.querySelectorAll('[data-mst]').forEach(el=>el.addEventListener('click', ()=>{ MS_TAB = el.dataset.mst; renderDaily(); }));
   const ab = box.querySelector('[data-msatt]');
   if(ab) ab.addEventListener('click', ()=>{ const n = msAttend(); if(n===false) return; const o3 = loadMS(); o3.d.got.d_att = true; saveMS(o3); addCurrency(500); refreshCurrencyDisplay(); let msg = '출석 완료! 500냥을 받았어요.'; if(n%7===0){ addTickets(3); msg += `\n${n}일 연속 출석! 뽑기권 3장 지급`; } alert(msg); renderDaily(); });
+  box.querySelectorAll('[data-msbonus]').forEach(el=>el.addEventListener('click', ()=>{
+    const o2 = loadMS(), k = el.dataset.msbonus, B = MS_BONUS[p].find(x=>x[0]===k); if(!B || o2[p].got['__'+k] || msDoneCount(p, o2[p]) < msBonusNeed(p, k)) return;
+    o2[p].got['__'+k] = true; saveMS(o2); addTickets(B[1]); alert(`${MS_LABEL[p]} 미션 ${k==='all'?'모두':'50%'} 달성! 뽑기권 ${B[1]}장을 받았어요.`); refreshCurrencyDisplay && refreshCurrencyDisplay(); renderDaily(); updateBadges(); }));
   box.querySelectorAll('[data-msget]').forEach(el=>el.addEventListener('click', ()=>{
     const o2 = loadMS(); const m = MISSIONS[p].find(x=>x.id===el.dataset.msget); if(!m || o2[p].got[m.id] || (o2[p].c[m.kind]||0)<m.need) return;
     o2[p].got[m.id] = true; saveMS(o2); addCurrency(m.reward); if(m.tickets) addTickets(m.tickets); refreshCurrencyDisplay && refreshCurrencyDisplay(); renderDaily(); updateBadges(); }));
@@ -2297,7 +2316,7 @@ const HELP_SECTIONS = [
   ['컨디션·피로','선수마다 매일 컨디션(⇈최상 ~ ⇊최악, ±6%)이 바뀌어요. 불펜 투수가 연속 등판하면 다음 경기에 −8%씩 지쳐요. 선발은 5명이 돌아가며 던져요.'],
   ['성장','훈련 탭에서 스킬블록(능력치+) 장착, 유학(12일, 성공 70%)으로 키워요. 유학지는 한국시리즈 우승·정규 1위 횟수로 열려요. 능력치는 상한이 없고, 수비·구종 등급은 D~EX로 표시돼요.'],
   ['AI 밸런스','상대 AI 팀은 내 경기 라인업의 평균 능력치를 일부(차이의 70%) 따라와요. 강해질수록 유리하지만 일방적이지 않게 맞춰져요.'],
-  ['보상','경기마다 승 150 · 무 100 · 패 100냥 + 활약 보너스(내 팀 안타 1 · 홈런 5 · 탈삼진 1냥, 시범경기는 절반). 출석·일일 미션(매일 오전 7시 초기화), 한국시리즈 우승(뽑기권 10장), 시즌 종료 순위 보상과 내 선수 수상 보너스도 있어요. AI 팀은 내 라인업 능력치 평균에 맞춰 강해지거나 약해져요(차이의 70%).']
+  ['보상','경기마다 승 150 · 무 100 · 패 100냥 + 활약 보너스(내 팀 안타 1 · 홈런 5 · 탈삼진 1냥, 시범경기는 절반). 일일·주간·월간 미션(일일 모두 달성 뽑기권 1장 · 주간 50% 2장/모두 5장 · 월간 50% 10장/모두 20장, 매일 오전 7시 기준 초기화), 한국시리즈 우승(뽑기권 10장), 시즌 종료 순위 보상과 내 선수 수상 보너스도 있어요. AI 팀은 내 라인업 능력치 평균에 맞춰 강해지거나 약해져요(차이의 70%).']
 ];
 function openHelp(){
   openModal(`<span class="close" onclick="document.getElementById('overlay').classList.remove('active')">닫기</span><h3>게임 도움말</h3>${HELP_SECTIONS.map(([t,d])=>`<h2 class="sec">${t}</h2><div style="font-size:12.5px; line-height:1.6">${d}</div>`).join('')}`);
