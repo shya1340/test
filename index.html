@@ -601,6 +601,7 @@ document.getElementById('setupLgCheck').addEventListener('click', async ()=>{
   info.textContent = '리그를 찾는 중...';
   const L = await fetchLeague(code);
   if(!L){ info.textContent = '그 코드의 리그를 찾지 못했어요. 코드를 다시 확인해 주세요.'; showSetupPage(); return; }
+  { const bu = banUntil(L.root); if(bu > Date.now()){ info.textContent = `방장에 의해 퇴장되어 ${banLeftText(bu - Date.now())} 뒤에 공유리그에 참석이 가능합니다.`; alert(banMsg(bu)); showSetupPage(); return; } }
   SETUP_LG = L; SETUP_TAKEN = takenBases(L);
   const n = Object.keys(SETUP_TAKEN).length;
   info.innerHTML = `✓ 리그 <b>${code}</b> (방장 ${L.root.ownerNick||'-'}) · 감독 ${n}명 참가 중 · 흐리게 보이는 팀은 이미 주인이 있어요`;
@@ -762,8 +763,8 @@ async function loadLeague(){
   const L = await fetchLeague(code);
   if(!L){ LEAGUE = null; return null; }
   const me = L.members[team];
-  if(!me || me.uid!==UID || me.left){ // 리그에서 빠졌거나(장기 미접속 후 다른 감독이 이어받음) 기록이 없음
-    LEAGUE = {...L, active:false, gone:true}; return LEAGUE; }
+  if(!me || me.uid!==UID || me.left){ // 리그에서 빠졌거나(퇴장·장기 미접속 후 다른 감독이 이어받음) 기록이 없음
+    LEAGUE = {...L, active:false, gone:true, banned: banUntil(L.root) > Date.now(), banUntil: banUntil(L.root)}; return LEAGUE; }
   LEAGUE = {...L, active: Date.now() >= Date.parse(me.activeFrom||0)};
   pushMember().catch(()=>{});
   return LEAGUE;
@@ -803,9 +804,13 @@ async function joinLeague(code, quiet){
   code = (code||'').trim().toUpperCase();
   const L = await fetchLeague(code);
   if(!L){ alert('그 코드의 리그를 찾지 못했어요.'); return; }
+  const bu = banUntil(L.root);
+  if(bu > Date.now()){ alert(banMsg(bu)); return; }
   const cur = L.members[team];
   if(cur && cur.uid!==UID && !memberStale(cur)){ alert(`이 리그에서는 ${team}(베이스)을 이미 ${cur.nick||'다른'} 감독이 맡고 있어요.\n베이스 팀이 겹치면 참가할 수 없어요.`); return; }
-  const info = await leagueSeasonInfo(code), from = nextJoinTime(info);
+  const info = await leagueSeasonInfo(code);
+  let from = nextJoinTime(info);
+  if(bu && info && bu >= Date.parse(info.seasonStart) - 3600000) from = Date.now(); // 퇴장 제한이 풀린 이번 시즌에는 바로 합류
   const pending = from > Date.now() + 60000;
   if(!quiet && !confirm(pending ? `리그 ${code}는 지금 정규시즌이 진행 중이에요.\n${new Date(from).toLocaleString()} 개막하는 다음 시즌부터 참가해요. 그 전까지는 지금처럼 개인 리그로 진행돼요.\n참가 예약할까요?` : `리그 ${code}에 참가할까요?\n바로 이 리그 시즌으로 진행돼요. (개인 리그 기록은 보관돼요)`)) return;
   localStorage.setItem('sn_lgcode_'+ns(), code);
@@ -815,6 +820,27 @@ async function joinLeague(code, quiet){
   schedulePush(); resetLeagueView();
   if(quiet) alert(pending ? `리그 ${code} 참가 예약 완료! ${new Date(from).toLocaleString()} 다음 시즌부터 함께해요.` : `리그 ${code}에 참가했어요!`);
   renderLeagueBox(); renderSchedule().catch(()=>{}); renderHome();
+}
+// 퇴장 제한: 다음 시즌 개막 전까지 같은 리그 재참가 불가 (bans: {uid: 참가 가능 시각 ms})
+function banUntil(root){ const b = root && root.bans; if(!b || Array.isArray(b)) return 0; return +b[UID] || 0; }
+function banLeftText(ms){ const d = Math.ceil(ms/86400000); if(ms >= 86400000) return `${d}일`; const h = Math.max(1, Math.ceil(ms/3600000)); return `${h}시간`; }
+function banMsg(until){ return `방장에 의해 퇴장되어 이번 시즌에는 참가할 수 없어요.\n${banLeftText(until - Date.now())} 뒤에 공유리그에 참석이 가능합니다.\n(${new Date(until).getMonth()+1}/${new Date(until).getDate()} ${String(new Date(until).getHours()).padStart(2,'0')}:00 다음 시즌 개막부터)`; }
+async function kickMember(t){ // 방장 전용: 감독 퇴장 → 그 팀은 바로 AI로, 같은 계정은 다시 참가 불가
+  if(!LEAGUE || !LEAGUE.root || LEAGUE.root.owner!==UID) return;
+  const m = LEAGUE.members[t]; if(!m || t===team) return;
+  if(!confirm(`${m.name||t} (감독 ${m.nick||'-'})을(를) 리그에서 퇴장시킬까요?\n\n· ${t} 팀은 지금부터 AI가 맡아요\n· 이 감독은 이번 시즌이 끝나고 다음 시즌 개막부터 다시 참가할 수 있어요\n· 지금까지의 경기 기록은 그대로 남아요`)) return;
+  try{
+    const rref = DB.doc('leagues/'+LEAGUE.code), rs = await rref.get(); const root = rs.exists ? rs.data() : {...LEAGUE.root};
+    const info = await leagueSeasonInfo(LEAGUE.code), st = info ? Date.parse(info.seasonStart) : Date.now();
+    const until = st + 7*86400000; // 다음 시즌 개막(다음 일요일 07시)
+    const bans = (root.bans && !Array.isArray(root.bans)) ? {...root.bans} : {}; for(const k in bans) if(bans[k] <= Date.now()) delete bans[k];
+    if(m.uid) bans[m.uid] = until;
+    await rref.set({...root, bans}); LEAGUE.root = {...root, bans};
+    await DB.doc('leagues/'+LEAGUE.code+'/members/'+TEAM_CODE[t]).delete();
+    delete LEAGUE.members[t];
+    alert(`${m.name||t} 감독을 퇴장시켰어요. ${t}은(는) 이제 AI 팀이에요.\n이 감독은 ${banLeftText(until - Date.now())} 뒤(다음 시즌 개막)부터 다시 참가할 수 있어요.`);
+    renderLeagueBox(); renderSchedule().catch(()=>{});
+  }catch(e){ alert('퇴장 처리에 실패했어요: '+(e && (e.code||e.message) || e)+'\nFirestore 규칙이 최신인지 확인해 주세요.'); }
 }
 async function leaveLeague(){
   if(!LEAGUE || !confirm('공유 리그를 나갈까요?\n내 팀은 그 리그에서 AI 팀으로 바뀌고, 나는 개인 리그로 돌아가요.')) return;
@@ -838,17 +864,19 @@ function renderLeagueBox(){
     return;
   }
   if(LEAGUE.gone){
-    box.innerHTML = `리그 <b>${LEAGUE.code}</b>에서 내 팀 자리가 없어졌어요(장기 미접속 후 다른 감독이 이어받았거나 나간 상태). 지금은 개인 리그로 진행돼요.<div style="margin-top:6px"><button class="btn ghost" id="lgClear" style="padding:6px 12px; font-size:12px">확인 (리그 정보 지우기)</button></div>`;
+    box.innerHTML = `리그 <b>${LEAGUE.code}</b>에서 내 팀 자리가 없어졌어요(${LEAGUE.banned ? `방장이 퇴장시켰어요 · ${banLeftText(LEAGUE.banUntil - Date.now())} 뒤에 공유리그에 참석이 가능합니다` : LEAGUE.banUntil ? '퇴장 제한이 끝나서 이제 다시 참가할 수 있어요' : '장기 미접속 후 다른 감독이 이어받았거나 나간 상태'}). 지금은 개인 리그로 진행돼요.<div style="margin-top:6px; display:flex; gap:6px">${!LEAGUE.banned ? '<button class="btn" id="lgRejoin" style="padding:6px 12px; font-size:12px">다시 참가</button>' : ''}<button class="btn ghost" id="lgClear" style="padding:6px 12px; font-size:12px">확인 (리그 정보 지우기)</button></div>`;
+    const rj = document.getElementById('lgRejoin'); if(rj) rj.onclick = ()=>joinLeague(LEAGUE.code).catch(e=>alert('참가 실패: '+(e && e.message || e)));
     document.getElementById('lgClear').onclick = ()=>{ localStorage.removeItem('sn_lgcode_'+ns()); LEAGUE = null; schedulePush(); resetLeagueView(); renderLeagueBox(); renderSchedule().catch(()=>{}); };
     return;
   }
-  const me = LEAGUE.members[team] || {}, pend = !inLeague();
+  const me = LEAGUE.members[team] || {}, pend = !inLeague(), owner = !!(LEAGUE.root && LEAGUE.root.owner===UID);
   const rows = TEAMS.map(t=>{ const m = LEAGUE.members[t];
     let st, who;
     if(!m || m.left){ st = '<span style="color:var(--sub)">AI</span>'; who = ''; }
     else { who = `${m.name||t} <span style="color:var(--sub)">· ${m.nick||''}</span>`;
       st = Date.now() < Date.parse(m.activeFrom||0) ? '<span style="color:#b07a00">다음 시즌 참가</span>' : memberStale(m) ? '<span style="color:#e0312b">장기 미접속 → AI</span>' : `<span style="color:#0a8f5a">참가 중</span>`; }
-    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #f5f7fa; font-size:12px; ${t===team?'font-weight:800':''}"><span><span style="display:inline-block; width:8px; height:8px; border-radius:4px; background:${TC[t]}; margin-right:5px"></span>${teamFull(t)}${who?` → ${who}`:''}</span>${st}</div>`; }).join('');
+    const kick = (owner && m && !m.left && t!==team) ? ` <button class="btn ghost" data-kick="${t}" style="padding:2px 8px; font-size:10px; color:#e0312b; border-color:#f3b4b1; margin-left:4px">퇴장</button>` : '';
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #f5f7fa; font-size:12px; ${t===team?'font-weight:800':''}"><span><span style="display:inline-block; width:8px; height:8px; border-radius:4px; background:${TC[t]}; margin-right:5px"></span>${teamFull(t)}${who?` → ${who}`:''}</span><span style="white-space:nowrap">${st}${kick}</span></div>`; }).join('');
   box.innerHTML = `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">공유 리그 코드 <b style="font-size:16px; letter-spacing:2px">${LEAGUE.code}</b>
       <button class="btn ghost" id="lgCopy" style="padding:4px 10px; font-size:11px">코드 복사</button>${LEAGUE.root && LEAGUE.root.owner===UID ? '<span style="font-size:11px; color:var(--gold); font-weight:800">방장</span>' : ''}</div>
     ${pend ? `<div style="margin-top:6px; color:#b07a00; font-weight:800">참가 예약됨 — ${new Date(Date.parse(me.activeFrom)).toLocaleString()} 개막하는 시즌부터 합류해요. 그 전까지는 개인 리그로 진행돼요.</div>` : ''}
@@ -857,6 +885,7 @@ function renderLeagueBox(){
     <button class="btn ghost" id="lgLeave" style="margin-top:8px; padding:6px 12px; font-size:12px">리그 나가기</button>`;
   document.getElementById('lgCopy').onclick = ()=>{ try{ navigator.clipboard.writeText(LEAGUE.code); }catch(e){} alert('코드를 복사했어요: '+LEAGUE.code); };
   document.getElementById('lgLeave').onclick = ()=>leaveLeague();
+  box.querySelectorAll('[data-kick]').forEach(el=>el.onclick = ()=>kickMember(el.dataset.kick));
 }
 // 정규시즌 박스스코어는 시즌 문서가 너무 커지지 않게 팀별 문서에 따로 저장
 function stripBoxes(season){ return {...season, results: season.results.map(r=>r && (r.box || r.boxes) ? (({box, boxes, ...x})=>x)(r) : r)}; }
@@ -1555,7 +1584,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 68; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 70; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
