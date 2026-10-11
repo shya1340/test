@@ -1601,7 +1601,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 78; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 79; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1930,14 +1930,14 @@ function renderStandingsPanes(){
     const cats = {'타율':{src:B, key:'avg', fmt:v=>v.toFixed(3), filter:x=>x.pa>=minPA, note:`규정타석 ${minPA}`},
                   '홈런':{src:B, key:'hr', fmt:v=>v}, '타점':{src:B, key:'rbi', fmt:v=>v}, '안타':{src:B, key:'h', fmt:v=>v}, '도루':{src:B, key:'sb', fmt:v=>v},
                   '평균자책점':{src:P, key:'era', fmt:v=>v.toFixed(2), asc:true, filter:x=>x.outs>=minIP*3 || x.ip>=minIP, note:`규정이닝 ${minIP}`},
-                  '승리':{src:P, key:'w', fmt:v=>v}, '패배':{src:P, key:'l', fmt:v=>v}, '탈삼진':{src:P, key:'so', fmt:v=>v}, '이닝':{src:P, key:'ip', fmt:v=>v.toFixed(1)}};
-    const GRP = {bat:['타율','홈런','타점','안타','도루'], pit:['평균자책점','승리','패배','탈삼진','이닝']};
+                  '승리':{src:P, key:'w', fmt:v=>v}, '패배':{src:P, key:'l', fmt:v=>v}, '홀드':{src:P, key:'hld', fmt:v=>v, filter:x=>x.hld>0}, '세이브':{src:P, key:'sv', fmt:v=>v, filter:x=>x.sv>0}, '탈삼진':{src:P, key:'so', fmt:v=>v}, '이닝':{src:P, key:'ip', fmt:v=>v.toFixed(1)}};
+    const GRP = {bat:['타율','홈런','타점','안타','도루'], pit:['평균자책점','승리','패배','홀드','세이브','탈삼진','이닝']};
     if(!GRP[PL_GRP].includes(PL_CAT)) PL_CAT = GRP[PL_GRP][0];
     const cat = cats[PL_CAT];
     const list = cat.src.filter(cat.filter||(()=>true)).sort((a,b)=> cat.asc ? a[cat.key]-b[cat.key] : b[cat.key]-a[cat.key]).slice(0,20);
     document.getElementById('stPane-player').innerHTML = `<div class="filtertabs" style="margin-bottom:6px">${[['bat','타자'],['pit','투수']].map(([g,l])=>`<div class="ftab ${PL_GRP===g?'active':''}" data-pg="${g}">${l}</div>`).join('')}</div><div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px">${GRP[PL_GRP].map(k=>`<button class="btn ghost" data-pc="${k}" style="padding:4px 10px; font-size:11px; ${k===PL_CAT?'background:var(--navy); color:#fff':''}">${k}</button>`).join('')}</div>
       <div style="font-size:11px; color:var(--sub); margin-bottom:4px">인게임 정규시즌 기록 · TOP 20${cat.note?` · ${cat.note} 이상`:''} · 내 팀 소속 기록과 AI 팀 소속 기록은 따로 집계</div>
-      ${list.length ? `<table class="standtbl"><tr><th class="rk">순</th><th>선수</th><th>팀</th><th>${PL_CAT}</th><th>세부</th></tr>${list.map((x,i)=>`<tr class="${x.mine?'me':''}"><td class="rk">${i+1}</td><td>${x.c.name}</td><td>${x.tl}</td><td><b>${cat.fmt(x[cat.key])}</b></td><td style="color:var(--sub)">${x.c.pos==='타자' ? `${x.pa}타석 ${x.avg.toFixed(3)} ${x.hr}홈런 ${x.rbi}타점` : `${x.ip.toFixed(1)}이닝 ${x.w}승 ${x.l}패 ERA ${x.era.toFixed(2)} ${x.so}K`}</td></tr>`).join('')}</table>` : '<div class="result-line">아직 기록이 부족해요.</div>'}`;
+      ${list.length ? `<table class="standtbl"><tr><th class="rk">순</th><th>선수</th><th>팀</th><th style="white-space:nowrap">${PL_CAT}</th><th>세부</th></tr>${list.map((x,i)=>`<tr class="${x.mine?'me':''}"><td class="rk">${i+1}</td><td style="white-space:nowrap">${x.c.name}</td><td style="white-space:nowrap">${x.tl}</td><td><b>${cat.fmt(x[cat.key])}</b></td><td style="color:var(--sub)">${x.c.pos==='타자' ? `${x.pa}타석 ${x.avg.toFixed(3)} ${x.hr}홈런 ${x.rbi}타점` : `${x.ip.toFixed(1)}이닝 ${x.w}승 ${x.l}패${x.hld?` ${x.hld}홀드`:''}${x.sv?` ${x.sv}세이브`:''} ERA ${x.era.toFixed(2)} ${x.so}K`}</td></tr>`).join('')}</table>` : '<div class="result-line">아직 기록이 부족해요.</div>'}`;
     document.querySelectorAll('[data-pc]').forEach(el=>el.addEventListener('click', ()=>{ PL_CAT = el.dataset.pc; renderStandingsPanes(); }));
     document.querySelectorAll('[data-pg]').forEach(el=>el.addEventListener('click', ()=>{ PL_GRP = el.dataset.pg; PL_CAT = PL_GRP==='bat' ? '타율' : '평균자책점'; renderStandingsPanes(); }));
   }
