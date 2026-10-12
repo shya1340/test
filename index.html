@@ -1662,7 +1662,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 81; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 82; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1810,7 +1810,7 @@ function simSeasonGame(g, ctx){
       const mk = side => ({ ls:{a:r.linescore.away, h:r.linescore.home}, h:{a:r.hits.away, h:r.hits.home}, e:{a:r.errors.away, h:r.errors.home},
         plays: r.plays.slice(0,15), side,
         bat: Object.values(side==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
-        pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) }, pk, hl: r.hl||[] });
+        pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) }, pk, hl: (r.hl||[]).map(e=>e.map(v=>String(v).replace(/\u001f/g,' ')).join('\u001f')) });
       const ms = g.home===team ? 'h' : g.away===team ? 'a' : null;
       if(ms) pbpSave(pk, log);
       if(inLeague()){ out.boxes = {}; sides.forEach(s=>{ out.boxes[s] = mk(s); }); if(ms) out.box = out.boxes[ms]; }
@@ -2146,7 +2146,7 @@ function showHighlights(g, r, title){
       <button class="btn ghost" id="hlNext" style="padding:6px 12px">⏭ 다음</button>
       <button class="btn ghost" id="hlSpeed" style="padding:6px 12px">1×</button></div>
     <div id="hlProg" style="text-align:center; font-size:11px; color:var(--sub); margin-top:4px"></div>`);
-  const ev = b.hl, P = {H:[150,262], 1:[222,190], 2:[150,118], 3:[78,190]};
+  const ev = b.hl.map(e=>{ if(Array.isArray(e)) return e; const a = String(e).split('\u001f'); return a.map((v,i)=>(i===2||i===3||i===4||i===12) ? v : +v); }), P = {H:[150,262], 1:[222,190], 2:[150,118], 3:[78,190]};
   const st = HL_STATE = {i:0, t:0, playing:true, speed:1, raf:0, last:0};
   const $ = id => document.getElementById(id);
   const bases = m => [1,2,3].filter(k=>m & (1<<(k-1)));
