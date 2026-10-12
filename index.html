@@ -179,9 +179,16 @@ h2.sec{font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:700;}
     <div class="loginlogo">⚾</div>
     <h1 class="loginTitle">다이아몬드 크로니클</h1>
     <p class="loginSub">구글 계정으로 로그인하면<br>PC·모바일 어디서든 이어서 할 수 있어요</p>
+    <div id="inappWarn" style="display:none; margin-top:14px; text-align:left; background:#fff7e6; border:1px solid #f3c56b; border-radius:12px; padding:12px; font-size:12.5px; line-height:1.55; color:#5a4310"></div>
     <div id="fbLoginBox" style="margin-top:14px">
       <button class="btn" style="width:100%; padding:13px" id="googleLoginBtn">G&nbsp;&nbsp;구글 계정으로 시작하기</button>
       <div id="fbLoginStatus" style="font-size:11px; color:var(--sub); margin-top:8px"></div>
+      <div style="margin-top:6px"><a href="#" id="loginHelpLink" style="font-size:11.5px; color:var(--sub); text-decoration:underline">로그인이 안 되나요?</a></div>
+      <div id="loginHelp" style="display:none; text-align:left; font-size:11.5px; line-height:1.6; color:var(--sub); background:#f5f7fa; border-radius:10px; padding:10px; margin-top:6px">
+        <b>📱 아이폰</b><br>· 카카오톡·인스타그램 등 <b>앱 안에서 열린 화면</b>에서는 구글이 로그인을 막아요. 오른쪽 아래(또는 위) <b>⋯ / 공유 버튼 → "Safari로 열기"</b>를 눌러주세요.<br>· Safari에서도 안 되면: 설정 → 앱 → Safari → <b>"팝업 차단" 끄기</b>, <b>"크로스 사이트 추적 방지" 잠시 끄기</b> 후 다시 시도해 주세요.<br>
+        <b>🤖 안드로이드</b><br>· 앱 안 화면이면 ⋮ 메뉴 → <b>"다른 브라우저로 열기"</b> 또는 Chrome에서 주소를 붙여넣어 주세요.<br>
+        <b>💻 PC</b><br>· 팝업이 막혔다면 주소창 오른쪽의 팝업 차단 아이콘에서 허용해 주세요.
+      </div>
     </div>
     <div class="loginFuture" id="loginFutureNote">처음이라면 로그인 후 감독 이름과 구단 이름을 정하고, 베이스 팀을 골라 시작해요.</div>
   </div>
@@ -632,7 +639,9 @@ async function googleLogin(){
     try{ await FB.U.signInWithPopup(FB.auth, provider); }
     catch(e){ if(e && (e.code==='auth/popup-blocked' || e.code==='auth/operation-not-supported-in-this-environment')) return FB.U.signInWithRedirect(FB.auth, provider); throw e; }
     CLOUD_INIT = initCloudSync(); await CLOUD_INIT;
-  }catch(e){ if(st) st.textContent = '로그인 실패: ' + (e && (e.code||e.message) || e); }
+  }catch(e){ const c = e && (e.code||e.message) || String(e);
+    if(st) st.innerHTML = '로그인 실패: ' + c + (/web-storage|disallowed|operation-not-supported|network|internal-error|popup/.test(c) ? '<br><b>아래 "로그인이 안 되나요?"를 눌러 방법을 확인해 주세요.</b>' : '');
+    const h = document.getElementById('loginHelp'); if(h && /web-storage|disallowed|operation-not-supported|internal-error/.test(c)) h.style.display = 'block'; }
   updateLoginUI();
 }
 async function getCloudBackend(){
@@ -680,6 +689,48 @@ async function initCloudSync(){
   renderLeagueTeams();
 }
 document.getElementById('googleLoginBtn').addEventListener('click', googleLogin);
+// ===== 앱 안 브라우저(카톡·인스타 등) 감지 → 외부 브라우저 안내 =====
+function inAppInfo(){
+  const ua = navigator.userAgent || '';
+  const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /Android/i.test(ua);
+  let app = '';
+  if(/KAKAOTALK/i.test(ua)) app = '카카오톡';
+  else if(/NAVER\(inapp|NAVER/i.test(ua) && !/Whale/i.test(ua)) app = '네이버';
+  else if(/Instagram/i.test(ua)) app = '인스타그램';
+  else if(/FBAN|FBAV|FB_IAB/i.test(ua)) app = '페이스북';
+  else if(/Line\//i.test(ua)) app = '라인';
+  else if(/DaumApps|DaumDevice/i.test(ua)) app = '다음';
+  else if(/everytimeApp|BAND\//i.test(ua)) app = '앱';
+  else if(android && /; wv\)/.test(ua)) app = '앱';
+  else if(ios && !/Safari\//.test(ua) && /AppleWebKit/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua)) app = '앱';
+  return {ios, android, app};
+}
+function openExternal(){
+  const url = location.href, I = inAppInfo();
+  if(I.app==='카카오톡'){ location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); return; }
+  if(I.android){ location.href = 'intent://' + url.replace(/^https?:\/\//,'') + '#Intent;scheme=https;package=com.android.chrome;end'; return; }
+  copyLoginLink();
+}
+async function copyLoginLink(){
+  const url = location.href; let ok = false;
+  try{ await navigator.clipboard.writeText(url); ok = true; }catch(e){
+    try{ const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); ok = document.execCommand('copy'); t.remove(); }catch(e2){}
+  }
+  const m = document.getElementById('inappCopyMsg'); if(m) m.textContent = ok ? '✓ 주소를 복사했어요. Safari(또는 Chrome) 주소창에 붙여넣어 주세요.' : '주소: ' + url;
+}
+(function(){
+  const I = inAppInfo(), box = document.getElementById('inappWarn');
+  const hl = document.getElementById('loginHelpLink'); if(hl) hl.onclick = e=>{ e.preventDefault(); const h = document.getElementById('loginHelp'); h.style.display = h.style.display==='none' ? 'block' : 'none'; };
+  if(!I.app || !box) return;
+  const how = I.ios ? '화면 오른쪽 아래(또는 위)의 <b>⋯ / 공유 버튼 → "Safari로 열기"</b>' : '오른쪽 위 <b>⋮ 메뉴 → "다른 브라우저로 열기"</b>';
+  box.innerHTML = `<b>⚠️ ${I.app==='앱'?'앱 안 브라우저':I.app+' 안 브라우저'}에서는 구글 로그인이 안 돼요</b><br>구글 정책상 앱 안에서 열린 화면에서는 로그인이 막혀 있어요. ${how}를 눌러 ${I.ios?'Safari':'Chrome'}에서 열어주세요.
+    <div style="display:flex; gap:6px; margin-top:8px">${(I.app==='카카오톡'||I.android)?`<button class="btn" id="inappOpen" style="flex:1; padding:9px; font-size:12px">${I.ios?'Safari':'Chrome'}로 열기</button>`:''}<button class="btn ghost" id="inappCopy" style="flex:1; padding:9px; font-size:12px; background:#fff">주소 복사</button></div>
+    <div id="inappCopyMsg" style="font-size:11px; margin-top:6px"></div>`;
+  box.style.display = 'block';
+  const ob = document.getElementById('inappOpen'); if(ob) ob.onclick = openExternal;
+  document.getElementById('inappCopy').onclick = copyLoginLink;
+})();
 CLOUD_INIT = initCloudSync();
 
 // ===== 리그 참가 (팀 등록) =====
@@ -1611,7 +1662,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 80; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 81; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1691,7 +1742,7 @@ function nextSeasonStartAfter(date){ // date 이후 첫 일요일 07시
   if(d <= date) d.setDate(d.getDate()+7);
   return d;
 }
-function buildSeasonScheduleObject(){
+function buildSeasonScheduleObject(startAt){
   const pairs = [];
   for(let i=0;i<TEAMS.length;i++) for(let j=i+1;j<TEAMS.length;j++) pairs.push([TEAMS[i],TEAMS[j]]);
   // 9라운드 라운드로빈 x 12바퀴 = 108슬롯, 바퀴마다 라운드 순서를 섞고 홀수 바퀴는 홈/원정 반전(상대별 홈 6·원정 6)
@@ -1706,7 +1757,8 @@ function buildSeasonScheduleObject(){
   const dow = start.getDay();
   start.setHours(7,0,0,0);
   let preseason = null;
-  if(dow!==0){ start.setDate(start.getDate()+(7-dow)); preseason = buildPreseason(now, start); }
+  if(startAt){ start.setTime(+new Date(startAt)); } // 시즌 교체: 지나간 일요일에 개막한 것으로(시범경기 없이 밀린 경기 계산)
+  else if(dow!==0){ start.setDate(start.getDate()+(7-dow)); preseason = buildPreseason(now, start); }
   return {v: SEASON_VERSION, seasonStart: start.toISOString(), games, results: new Array(games.length).fill(null), lastSimIdx: -1, preseason};
 }
 function buildSeasonSchedule(){
@@ -2768,7 +2820,9 @@ async function getSharedSeason(){
 }
 async function catchUpSeasonShared(){
   let season = await getSharedSeason();
-  const target = currentSlotIndex(season);
+  let lateHist = null;
+  if(season && season.preseason && season.lastSimIdx<0 && new Date(season.seasonStart) > new Date()){ try{ const hs = await DB.doc(LG('history')).get(); lateHist = (hs.exists && hs.data().list) || []; if(!fixLateRollover({...season, results:[], games:season.games}, lateHist)) lateHist = null; }catch(e){ lateHist = null; } }
+  const target = lateHist ? 0 : currentSlotIndex(season);
   const preBehind = season.preseason && preseasonTarget(season) > season.preseason.lastSimIdx;
   // 다른 기기가 이미 계산했으면 선수 기록도 클라우드 것을 받아옴(안 받으면 이 기기의 옛 기록이 카드에 표시됨)
   const pullGS = async ()=>{ try{ const g = await DB.doc(LG('gamestats')).get(); GS = g.exists ? (g.data()||{}) : {}; saveGameStats(GS); }catch(e){} };
@@ -2782,9 +2836,10 @@ async function catchUpSeasonShared(){
   const gsRef = DB.doc(LG('gamestats'));
   const gsSnap = await gsRef.get();
   GS = gsSnap.exists ? gsSnap.data() : {};
+  const lateFixed = lateHist ? fixLateRollover(season, lateHist) : false;
   const target2 = currentSlotIndex(season);
   const from = season.lastSimIdx+1;
-  let changed = catchUpPreseason(season);
+  let changed = catchUpPreseason(season) || lateFixed;
   for(let i=season.lastSimIdx+1; i<=target2; i++){
     FAT = season.fat || (season.fat = {});
     const r = simSeasonGame(season.games[i], {slot: 10000+Math.floor(i/5), rot: Math.floor(i/5), dayKey: gameDayKey(slotIndexToDate(season.seasonStart, i)), box: true, at: slotIndexToDate(season.seasonStart, i)});
@@ -2965,7 +3020,9 @@ async function renderSchedule(){
       catch(e2){ sharedOk=false; season = loadSeason(); } // 연결 실패 시 경기를 새로 계산하지 않음(클라우드와 결과가 달라지는 것 방지)
     }
   } else {
-    season = loadSeason(); season = catchUpSeason(season);
+    season = loadSeason();
+    try{ if(fixLateRollover(season, JSON.parse(localStorage.getItem(LK('sn_league_history'))||'[]'))) saveSeason(season); }catch(e){}
+    season = catchUpSeason(season);
   }
   const played = season.lastSimIdx+1;
   const nowSlotDate = played>0 ? slotIndexToDate(season.seasonStart, season.lastSimIdx) : null;
@@ -3031,10 +3088,22 @@ async function renderSchedule(){
   LAST_SEASON = season; if(fixMyGS(season)) saveGameStats(GS); try{ localStorage.setItem(LK('sn_seasonstart'), season.seasonStart); }catch(e){} renderCalendar(); try{ renderNextOpponent(); }catch(e){} try{ renderDaily(); renderNotices(); }catch(e){}
   pushRanking();
 }
+// 가장 최근 일요일 07시(지금 이전)
+function lastSundayStart(now){ const d = new Date(now); d.setHours(7,0,0,0); d.setDate(d.getDate()-d.getDay()); if(d > now) d.setDate(d.getDate()-7); return d; }
+// 버그 복구: 일요일이 지나서야 시즌이 교체되면 다음 일요일 개막 + 시범경기로 잘못 만들어졌음 → 지난 일요일 개막으로 되돌림
+function fixLateRollover(season, hist){
+  if(!season || !season.preseason || season.lastSimIdx>=0) return false;
+  const now = new Date(); if(new Date(season.seasonStart) <= now) return false;
+  const starts = (hist||[]).map(x=>Date.parse(x && x.seasonStart)).filter(x=>!isNaN(x)); if(!starts.length) return false;
+  const expected = new Date(Math.max(...starts) + 7*86400000); if(expected > now) return false;
+  season.seasonStart = lastSundayStart(now).toISOString(); season.preseason = null;
+  season.results = new Array(season.games.length).fill(null); season.lastSimIdx = -1;
+  return true;
+}
 // 포스트시즌이 끝난 뒤 다음 일요일이 지나면 새 시즌 생성(일요일이 아니면 다음 일요일까지 시범경기)
 let ROLLOVER_TRIED = false; // 한 번 로드에 한 번만 시도(무한 재시도 방지)
 async function startNewSeason(shared){
-  const fresh = buildSeasonScheduleObject();
+  const fresh = buildSeasonScheduleObject(lastSundayStart(new Date()));
   // 끝난 시즌 결과를 히스토리에 남김(이 시기에 접속하지 않은 유저도 나중에 우승 기록을 받도록)
   const recordHistory = async (oldSeason, ps)=>{
     if(!oldSeason || !ps || !ps.champion) return;
