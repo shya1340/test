@@ -1478,6 +1478,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
   const box = {away:{}, home:{}}, pbox = {away:{}, home:{}}, plays = [];
   const apps = {away:[], home:[]}; let goAhead = null; // 승·패·세이브·홀드 판정용
   let walkoff=false, finished=false;
+  const hlEv = []; const bmask = B => (B[0]?1:0)|(B[1]?2:0)|(B[2]?4:0); // 하이라이트용 타석 기록
   for(let inning=1; inning<=MAX_INNINGS && !finished; inning++){
     log.push({t:'inn', text:`${inning}회`});
     for(const side of ['away','home']){
@@ -1542,7 +1543,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
         }
         const outcome = simAB(batter, pitcher, {def, bat: TT.bat});
         const wasBehindOrTied = side==='home' && score.home<=score.away;
-        const outsBefore = outs.o;
+        const outsBefore = outs.o, m0 = bmask(bases);
         const res = advanceRunners(bases, outcome, outs, batter, fd);
         bases=res.bases; innRuns+=res.runs;
         const isHit = ['1B','2B','3B','HR'].includes(outcome.type);
@@ -1556,6 +1557,7 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
         const b = box[side][pkey(batter)] || (box[side][pkey(batter)] = {n:batter.name, pos:batter.gamePos||batter.fieldpos||'', ab:0, h:0, hr:0, rbi:0, bb:0});
         if(outcome.type!=='BB' && outcome.type!=='HBP') b.ab++; if(isHit) b.h++; if(outcome.type==='HR') b.hr++; if(outcome.type==='BB'||outcome.type==='HBP') b.bb++; if(!res.error) b.rbi += res.runs;
         log.push({t:'ab', text:`${batter.name}: ${res.desc}`, score:res.runs>0});
+        hlEv.push([inning, side==='away'?0:1, batter.name, pitcher.name, outcome.type, res.runs, outsBefore, outs.o, m0, bmask(bases), score.away, score.home, String(res.desc||'').slice(0,40)]);
         if(res.runs>0 || outcome.type==='HR') plays.push(`${inning}회${side==='away'?'초':'말'} ${side==='away'?awayName:homeName} ${batter.name} — ${res.desc}`);
         if(side==='home' && inning>=9 && wasBehindOrTied && score.home>score.away){ walkoff=true; finished=true; break; }
       }
@@ -1596,12 +1598,20 @@ function simGame(awayName, homeName, awayLineup, homeLineup, awayStaff, homeStaf
   if(linescore.away.length>9) highlights.push('extra');
   log.push({t:'final', text:`경기 종료 — ${awayName} ${score.away} : ${score.home} ${homeName}`});
   if(!NO_TALLY) saveGameStats(GS);
-  return {score, linescore, hits, errors, highlights, box, pbox, plays};
+  // 하이라이트 장면 고르기: 득점·홈런·주자 두고 이닝 끝낸 삼진·마지막 타석, 장면이 적으면 안타 추가 (최대 18개)
+  const imp = e => (e[4]==='HR'?100:0) + e[5]*20 + (e[4]==='K' && (e[8]&6) && e[7]>=3 ? 15 : 0);
+  let pick = hlEv.map((e,i)=>({e,i,s:imp(e)})).filter(x=>x.s>0);
+  if(hlEv.length) pick.push({e:hlEv[hlEv.length-1], i:hlEv.length-1, s:50});
+  if(pick.length < 6) hlEv.forEach((e,i)=>{ if(['2B','3B','1B'].includes(e[4]) && !pick.some(x=>x.i===i)) pick.push({e,i,s:e[4]==='1B'?1:3}); });
+  const uniq = new Map(); pick.forEach(x=>{ if(!uniq.has(x.i) || uniq.get(x.i).s<x.s) uniq.set(x.i,x); });
+  pick = [...uniq.values()].sort((x,y)=>y.s-x.s).slice(0,18).sort((x,y)=>x.i-y.i);
+  const hl = pick.map(x=>x.e);
+  return {score, linescore, hits, errors, highlights, box, pbox, plays, hl};
 }
 
 // ===== 정규시즌 엔진 =====
 // 한 시즌 = 일주일: 일~금 정규시즌(매시 정각 07~24시, 10팀 전부 동시에 5경기) · 토 포스트시즌 · 다음 날(일) 새 시즌 개막
-const APP_BUILD = 79; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
+const APP_BUILD = 80; // 경기 계산 코드 버전(낮은 버전 기기는 계산하지 않고 새로고침 안내)
 const SEASON_VERSION = 4; // 3: 팀 이름 변경, 4: 선수 가명
 const SLOTS_PER_DAY = 18; // 07~24시
 const DAYS_PER_WEEK = 6;  // 일~금 (토 제외)
@@ -1748,7 +1758,7 @@ function simSeasonGame(g, ctx){
       const mk = side => ({ ls:{a:r.linescore.away, h:r.linescore.home}, h:{a:r.hits.away, h:r.hits.home}, e:{a:r.errors.away, h:r.errors.home},
         plays: r.plays.slice(0,15), side,
         bat: Object.values(side==='h' ? r.box.home : r.box.away).map(b=>({n:b.n, pos:b.pos, ab:b.ab, h:b.h, hr:b.hr, rbi:b.rbi, bb:b.bb, sb:b.sb||0})),
-        pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) }, pk });
+        pit: { a: Object.values(r.pbox.away).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})), h: Object.values(r.pbox.home).map(p=>({n:p.n, ip:ip(p.outs), r:p.r, so:p.so, d:p.d||''})) }, pk, hl: r.hl||[] });
       const ms = g.home===team ? 'h' : g.away===team ? 'a' : null;
       if(ms) pbpSave(pk, log);
       if(inLeague()){ out.boxes = {}; sides.forEach(s=>{ out.boxes[s] = mk(s); }); if(ms) out.box = out.boxes[ms]; }
@@ -2040,12 +2050,107 @@ function showBoxScore(g, r, title){
     <h3 style="margin-bottom:2px">${title||''}</h3><div style="font-size:12px; color:var(--sub)">${TN(g.away)} ${r.scoreAway} : ${r.scoreHome} ${TN(g.home)}${tags?' · '+tags:''}</div>
     ${grid}
     ${b.pk && pbpGet(b.pk) ? `<button class="btn ghost" id="pbpBtn" style="margin-top:8px">📻 경기 중계 다시보기</button>` : `<div style="font-size:11px; color:var(--sub); margin-top:6px">경기 중계는 이 기기에서 계산된 최근 ${PBP_MAX}경기만 다시 볼 수 있어요</div>`}
+    ${(b.hl||[]).length ? `<button class="btn" id="hlBtn" style="margin-top:8px; width:100%">🎬 하이라이트 보기 (${b.hl.length}장면)</button>` : ''}
     <h2 class="sec">득점 장면</h2>${(b.plays||[]).length ? b.plays.map(p=>`<div style="font-size:12px; padding:3px 0; border-bottom:1px solid #f5f7fa">${p}</div>`).join('') : '<div class="result-line">득점이 없었어요</div>'}
     <h2 class="sec">${myTeamName()} 타자</h2><div style="overflow-x:auto"><table class="standtbl" style="white-space:nowrap"><tr><th>선수</th><th>포지션</th><th>타수</th><th>안타</th><th>홈런</th><th>타점</th><th>볼넷</th><th>도루</th></tr>${bat}</table></div>
     <h2 class="sec">투수 기록</h2><div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
       <div><div style="font-size:11px; font-weight:800">${TN(g.away)}</div><table class="standtbl"><tr><th>투수</th><th>이닝</th><th>실점</th><th>K</th></tr>${pit('a')}</table></div>
       <div><div style="font-size:11px; font-weight:800">${TN(g.home)}</div><table class="standtbl"><tr><th>투수</th><th>이닝</th><th>실점</th><th>K</th></tr>${pit('h')}</table></div></div>`);
   const pb = document.getElementById('pbpBtn'); if(pb) pb.onclick = ()=>showPBP(b.pk, `${title||''} 중계`);
+  const hb = document.getElementById('hlBtn'); if(hb) hb.onclick = ()=>showHighlights(g, r, title);
+}
+
+// ===== 🎬 2D 하이라이트 =====
+const HL_TXT = {'1B':'안타','2B':'2루타','3B':'3루타','HR':'홈런!','BB':'볼넷','HBP':'몸에 맞는 공','K':'삼진','OUT':'아웃','E':'실책 출루'};
+let HL_STATE = null;
+function showHighlights(g, r, title){
+  const b = r.box; if(!b || !(b.hl||[]).length) return;
+  if(HL_STATE && HL_STATE.raf) cancelAnimationFrame(HL_STATE.raf);
+  const A = TN(g.away), H = TN(g.home), CA = TC[g.away]||'#555', CH = TC[g.home]||'#555';
+  openModal(`<span class="close" id="hlClose">닫기</span>
+    <h3 style="margin-bottom:6px">🎬 ${title||'하이라이트'}</h3>
+    <div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; margin-bottom:6px">
+      <span style="background:${CA}; color:#fff; border-radius:6px; padding:2px 8px">${A}</span><span id="hlSA" style="font-size:18px">0</span>
+      <span style="color:var(--sub)">:</span><span id="hlSH" style="font-size:18px">0</span><span style="background:${CH}; color:#fff; border-radius:6px; padding:2px 8px">${H}</span>
+      <span id="hlInn" style="margin-left:auto; color:var(--sub)"></span></div>
+    <svg id="hlField" viewBox="0 0 300 270" style="width:100%; max-width:420px; display:block; margin:0 auto; border-radius:12px; background:#2f7d3a">
+      <defs><radialGradient id="hlGrass" cx="50%" cy="100%" r="100%"><stop offset="0" stop-color="#3f9a4a"/><stop offset="1" stop-color="#2a6e33"/></radialGradient></defs>
+      <path d="M150 262 L10 122 A198 198 0 0 1 290 122 Z" fill="url(#hlGrass)"/>
+      <path d="M10 122 A198 198 0 0 1 290 122" fill="none" stroke="#e8e2c8" stroke-width="4"/>
+      <path d="M150 262 L222 190 L150 118 L78 190 Z" fill="#c9915b"/>
+      <path d="M150 248 L208 190 L150 132 L92 190 Z" fill="#3f9a4a"/>
+      <circle cx="150" cy="190" r="9" fill="#c9915b"/>
+      <line x1="150" y1="262" x2="10" y2="122" stroke="#fff" stroke-width="1.5"/><line x1="150" y1="262" x2="290" y2="122" stroke="#fff" stroke-width="1.5"/>
+      <g fill="#fff"><rect x="216" y="184" width="11" height="11" transform="rotate(45 222 190)"/><rect x="144" y="112" width="11" height="11" transform="rotate(45 150 118)"/><rect x="72" y="184" width="11" height="11" transform="rotate(45 78 190)"/><path d="M144 258 h12 v5 l-6 5 l-6 -5 z"/></g>
+      <g id="hlRunners"></g>
+      <circle id="hlBall" r="4" fill="#fff" stroke="#999" stroke-width="1" style="display:none"/>
+      <text id="hlBig" x="150" y="80" text-anchor="middle" font-size="30" font-weight="900" fill="#fff" stroke="#0a1530" stroke-width="1.2" style="opacity:0"></text>
+      <g id="hlOuts"></g>
+    </svg>
+    <div id="hlCap" style="min-height:40px; margin-top:8px; font-size:13px; font-weight:700; text-align:center"></div>
+    <div style="display:flex; justify-content:center; gap:6px; margin-top:6px; flex-wrap:wrap">
+      <button class="btn ghost" id="hlRestart" style="padding:6px 12px">⏮ 처음</button>
+      <button class="btn" id="hlPlay" style="padding:6px 16px">⏸ 일시정지</button>
+      <button class="btn ghost" id="hlNext" style="padding:6px 12px">⏭ 다음</button>
+      <button class="btn ghost" id="hlSpeed" style="padding:6px 12px">1×</button></div>
+    <div id="hlProg" style="text-align:center; font-size:11px; color:var(--sub); margin-top:4px"></div>`);
+  const ev = b.hl, P = {H:[150,262], 1:[222,190], 2:[150,118], 3:[78,190]};
+  const st = HL_STATE = {i:0, t:0, playing:true, speed:1, raf:0, last:0};
+  const $ = id => document.getElementById(id);
+  const bases = m => [1,2,3].filter(k=>m & (1<<(k-1)));
+  const path = (from, to) => { const seq = ['H',1,2,3,'H']; const out = []; let i = from==='H'?0:seq.indexOf(from); const j = to==='H' ? 4 : seq.indexOf(to); for(let k=i;k<=j;k++) out.push(seq[k]); return out; };
+  const ptOn = (pts, f) => { if(pts.length<2) return P[pts[0]]; const segs = pts.length-1, x = Math.min(segs-1e-6, f*segs), k = Math.floor(x), u = x-k; const a = P[pts[k]], c = P[pts[k+1]]; return [a[0]+(c[0]-a[0])*u, a[1]+(c[1]-a[1])*u]; };
+  const target = e => { const t = e[4], R = Math.random; // 타구 도착점
+    const side = [[60,70],[150,40],[240,70]][Math.floor(((e[2].charCodeAt(0)+e[0]*7+e[6]*3)%3))];
+    if(t==='HR') return [side[0]+(side[0]<150?-25:side[0]>150?25:0), 8];
+    if(t==='3B') return [side[0]<150?28:272, 112];
+    if(t==='2B') return [side[0]===150?(e[1]?118:182):side[0], 66];
+    if(t==='1B') return [side[0], side[1]+40];
+    if(t==='OUT'||t==='E') return (e[0]+e[6])%2 ? [side[0], side[1]+12] : [[122,176],[178,176],[150,150]][e[6]%3];
+    return null; };
+  function plan(e){ // 주자 이동 계획: 앞 주자부터 홈→남은 루 순으로 배정
+    const before = bases(e[8]).sort((x,y)=>y-x).map(b=>b), after = bases(e[9]).sort((x,y)=>y-x);
+    const runners = [...before, 'H0'], dest = [...Array(e[5]).fill('H'), ...after];
+    return runners.map((rb,i)=>{ const from = rb==='H0' ? 'H' : rb, to = dest[i]; if(to===undefined) return {from, out:true}; if(rb==='H0' && to==='H') return {from:'H', pts:['H',1,2,3,'H']}; return {from, pts: path(from, to)}; });
+  }
+  function draw(){
+    const e = ev[st.i]; if(!e) return;
+    const dur = 2600, f = Math.min(1, st.t/dur), t = e[4];
+    $('hlInn').textContent = `${e[0]}회${e[1]?'말':'초'} · ${e[7]>=3?'3':e[7]}아웃`;
+    $('hlProg').textContent = `${st.i+1} / ${ev.length}`;
+    $('hlCap').innerHTML = `<span style="color:var(--sub); font-weight:400">${e[0]}회${e[1]?'말':'초'} ${e[1]?H:A} · 투수 ${e[3]}</span><br>${e[2]}: ${e[12]||HL_TXT[t]||t}`;
+    const scoreShown = f>0.75; $('hlSA').textContent = scoreShown ? e[10] : (e[10] - (e[1]?0:e[5])); $('hlSH').textContent = scoreShown ? e[11] : (e[11] - (e[1]?e[5]:0));
+    // 아웃 표시
+    const oc = f>0.7 ? e[7] : e[6]; $('hlOuts').innerHTML = [0,1,2].map(k=>`<circle cx="${262+k*13}" cy="252" r="5" fill="${k<oc?'#ff5a4e':'rgba(255,255,255,.3)'}"/>`).join('') + `<text x="262" y="240" font-size="9" fill="#fff" font-weight="800">OUT</text>`;
+    // 공
+    const ball = $('hlBall'), tg = target(e), bf = Math.min(1, f/0.45);
+    if(tg && f<0.75){ const x = 150+(tg[0]-150)*bf, y = 262+(tg[1]-262)*bf - Math.sin(bf*Math.PI)*(t==='HR'?70:t==='OUT'&&tg[1]<120?50:t==='1B'?18:35); ball.style.display=''; ball.setAttribute('cx',x); ball.setAttribute('cy',y); }
+    else if(t==='K' && f<0.4){ const u = f/0.4; ball.style.display=''; ball.setAttribute('cx',150); ball.setAttribute('cy',190+72*u); }
+    else ball.style.display='none';
+    // 주자
+    const pl = plan(e), rf = Math.max(0, Math.min(1, (f-0.15)/0.6));
+    $('hlRunners').innerHTML = pl.map((x,i)=>{ let pos, op = 1;
+      if(x.out){ pos = P[x.from]; op = 1 - rf; }
+      else pos = ptOn(x.pts, rf);
+      const isBat = i===pl.length-1; const col = e[1] ? CH : CA;
+      return `<g opacity="${op}"><circle cx="${pos[0]}" cy="${pos[1]}" r="${isBat?8:7}" fill="${col}" stroke="#fff" stroke-width="2"/>${isBat?`<text x="${pos[0]}" y="${pos[1]-11}" text-anchor="middle" font-size="9" font-weight="800" fill="#fff">${e[2]}</text>`:''}</g>`; }).join('');
+    // 큰 글씨
+    const big = $('hlBig'), bigTxt = t==='HR' ? 'HOME RUN!' : t==='K' ? '삼진!' : e[5]>0 ? `${e[5]}점!` : (t==='3B'?'3루타!':t==='2B'?'2루타!':'');
+    big.textContent = bigTxt; big.style.opacity = bigTxt && f>0.45 ? Math.min(1,(f-0.45)/0.15) : 0;
+    big.setAttribute('fill', t==='HR' ? '#ffd84a' : t==='K' ? '#ff8a80' : '#fff');
+  }
+  function loop(ts){
+    if(!document.getElementById('hlField')){ st.raf = 0; return; }
+    const dt = st.last ? ts - st.last : 0; st.last = ts;
+    if(st.playing){ st.t += dt*st.speed; if(st.t >= 2600 + 700){ if(st.i < ev.length-1){ st.i++; st.t = 0; } else { st.playing = false; $('hlPlay').textContent = '▶ 다시보기'; } } }
+    draw(); st.raf = requestAnimationFrame(loop);
+  }
+  $('hlPlay').onclick = ()=>{ if(!st.playing && st.i===ev.length-1 && st.t>=2600){ st.i=0; st.t=0; } st.playing = !st.playing; $('hlPlay').textContent = st.playing ? '⏸ 일시정지' : '▶ 재생'; };
+  $('hlNext').onclick = ()=>{ if(st.i < ev.length-1){ st.i++; st.t = 0; } };
+  $('hlRestart').onclick = ()=>{ st.i = 0; st.t = 0; st.playing = true; $('hlPlay').textContent = '⏸ 일시정지'; };
+  $('hlSpeed').onclick = ()=>{ st.speed = st.speed===1 ? 2 : st.speed===2 ? 4 : 1; $('hlSpeed').textContent = st.speed+'×'; };
+  $('hlClose').onclick = ()=>{ if(st.raf) cancelAnimationFrame(st.raf); st.raf = 0; showBoxScore(g, r, title); };
+  st.raf = requestAnimationFrame(loop);
 }
 // ===== 시즌 시상 / 기록실 =====
 let CARD_BY_KEY = null;
